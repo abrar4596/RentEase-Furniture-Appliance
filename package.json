@@ -1,0 +1,26 @@
+{
+  "name": "rentease-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hyperlocal multi-vendor furniture & appliance rental platform",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/patch-cmd-shims.cjs",
+    "dev": "concurrently -k -p \"[{name}]\" -n \"API,WEB\" -c \"blue.bold,magenta.bold\" \"npm run dev -w @rentease/api\" \"npm run dev -w @rentease/web\"",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:coverage": "npm run test:coverage --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "type-check": "npm run type-check --workspaces --if-present",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md}\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "prettier": "^3.5.1",
+    "typescript": "^5.7.3"
+  }
+}
