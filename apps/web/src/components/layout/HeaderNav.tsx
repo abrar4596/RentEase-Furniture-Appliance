@@ -27,8 +27,8 @@ export function HeaderNav() {
           </div>
         </Link>
 
-        {/* Center: City Selector Pill */}
-        <div className="flex items-center gap-2">
+        {/* Center: City Selector Pill & Portal Quick Links */}
+        <div className="flex items-center gap-3">
           <button
             type="button"
             className="flex items-center gap-1.5 rounded-full border border-gray-300 bg-gray-50 px-3.5 py-1.5 text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors focus-visible:ring-2 focus-visible:ring-brand-500"
@@ -37,6 +37,32 @@ export function HeaderNav() {
             <span className="hidden xs:inline">City:</span>
             <span className="font-semibold text-gray-900">Select City / Pincode</span>
           </button>
+
+          {user?.role === 'vendor' && (
+            <Link href="/vendor/dashboard">
+              <Button
+                variant="outline"
+                size="sm"
+                className="hidden sm:flex items-center gap-1.5 text-xs text-brand-700 border-brand-200 hover:bg-brand-50"
+              >
+                <Store className="h-3.5 w-3.5 text-brand-600" />
+                <span>Vendor Dashboard</span>
+              </Button>
+            </Link>
+          )}
+
+          {user?.role === 'admin' && (
+            <Link href="/admin/vendors">
+              <Button
+                variant="outline"
+                size="sm"
+                className="hidden sm:flex items-center gap-1.5 text-xs text-amber-700 border-amber-200 hover:bg-amber-50"
+              >
+                <Shield className="h-3.5 w-3.5 text-amber-600" />
+                <span>Admin Queue</span>
+              </Button>
+            </Link>
+          )}
         </div>
 
         {/* Right: Auth State & Actions */}
