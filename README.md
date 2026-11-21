@@ -120,20 +120,56 @@ Run scripts from the monorepo root:
 | `POST` | `/api/v1/auth/reset-password`  | Public        | Reset password using valid token                                   | `{ token, newPassword }`                                         |
 | `POST` | `/api/v1/auth/google`          | Public        | Google OAuth 2.0 exchange & login/link                             | `{ credential }`                                                 |
 
+### Cities & Service Zones (Phase 2)
+
+| Method | Endpoint         | Auth   | Description                                              | Response Envelope                            |
+| :----- | :--------------- | :----- | :------------------------------------------------------- | :------------------------------------------- |
+| `GET`  | `/api/v1/cities` | Public | List active launch cities with serviced 6-digit pincodes | `{ success: true, data: { cities: [...] } }` |
+
+### Vendor Onboarding & Verification (Phase 2)
+
+| Method  | Endpoint                           | Auth   | Description                                           | Body / Payload                                            |
+| :------ | :--------------------------------- | :----- | :---------------------------------------------------- | :-------------------------------------------------------- |
+| `GET`   | `/api/v1/vendors/me`               | Vendor | Get authenticated vendor's store profile and status   | Header: `Authorization: Bearer <token>`                   |
+| `POST`  | `/api/v1/vendors/profile`          | Vendor | Register initial store profile, city, and pincodes    | `{ businessName, contactPhone, cityId, servicePincodes }` |
+| `PATCH` | `/api/v1/vendors/profile`          | Vendor | Update store contact details or service pincodes      | `{ businessName?, contactPhone?, servicePincodes? }`      |
+| `GET`   | `/api/v1/vendors/admin/all`        | Admin  | List all vendor registrations for verification review | Header: `Authorization: Bearer <admin_token>`             |
+| `PATCH` | `/api/v1/vendors/admin/:id/verify` | Admin  | Approve or reject vendor store verification           | `{ status: "APPROVED" \| "REJECTED", rejectionReason? }`  |
+
+### Inventory & Product Management (Phase 2)
+
+| Method   | Endpoint                       | Auth          | Description                                            | Body / Payload                                              |
+| :------- | :----------------------------- | :------------ | :----------------------------------------------------- | :---------------------------------------------------------- |
+| `POST`   | `/api/v1/products`             | Vendor        | Create product listing (draft mode if unverified)      | `{ title, category, subcategory, tenureTiers, stock, ... }` |
+| `GET`    | `/api/v1/products/vendor/mine` | Vendor        | Get all products owned by current authenticated vendor | Header: `Authorization: Bearer <token>`                     |
+| `GET`    | `/api/v1/products/:id`         | Public        | Get full product details and tenure tiers              | Params: `id`                                                |
+| `PATCH`  | `/api/v1/products/:id`         | Vendor        | Update product details, specs, and pricing tiers       | `{ title?, description?, tenureTiers?, ... }`               |
+| `PATCH`  | `/api/v1/products/:id/stock`   | Vendor        | Atomically update available stock count                | `{ stockCount: number }`                                    |
+| `PATCH`  | `/api/v1/products/:id/status`  | Vendor        | Update listing status (`active`, `draft`, `paused`)    | `{ status: "active" \| "draft" \| "paused" }`               |
+| `DELETE` | `/api/v1/products/:id`         | Vendor        | Delete listing (guarded by vendor ownership)           | Params: `id`                                                |
+| `GET`    | `/api/v1/uploads/signature`    | Vendor, Admin | Generate scoped signed Cloudinary upload params        | Query: `?folder=products \| kyc`                            |
+
 ---
 
-## Admin Seeding
+## Database Seeding
 
-Platform Admins cannot be registered via public endpoints. Seed the initial admin account via CLI:
+Platform Admins and Pilot Cities can be initialized via CLI commands:
 
 ```bash
+# Seed initial platform admin
 ADMIN_EMAIL=admin@rentease.in ADMIN_PASSWORD=RentEase@Admin2026 npm run seed:admin -w @rentease/api
+
+# Seed Tier-2/3 pilot cities (Jaipur, Indore, Lucknow, Coimbatore)
+npm run seed:cities -w @rentease/api
 ```
 
 ---
 
-## Money & Financial Integrity Invariants
+## Core Security & Domain Invariants
 
 - **Zero Float Rule:** All monetary amounts are stored and manipulated as positive integer **paise** (1 INR = 100 paise).
 - **Upfront Payable:** Calculated strictly server-side as `firstMonthRent + securityDeposit` for the chosen tenure tier.
 - **Deposit Transparency:** ₹0 security deposit is a fully supported, validated first-class tier.
+- **Vendor Approval Invariant:** Only vendors with `verificationStatus === 'APPROVED'` can publish products with `status === 'active'`. Pending or rejected vendors are strictly restricted to `status === 'draft'`.
+- **Vendor Ownership Invariant:** A vendor can only view, update, pause, change stock, or delete their own inventory. Enforced in `productService` by validating `product.vendorId === vendor._id`.
+- **Signed Cloudinary Uploads:** Image uploads use short-lived signatures generated server-side. Direct, unauthenticated image writes to Cloudinary are prohibited.
