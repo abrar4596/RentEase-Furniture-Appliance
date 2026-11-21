@@ -15,8 +15,10 @@ import {
 } from '../components/ui';
 import { Clock, ShieldCheck, Sparkles, Wrench, Search } from 'lucide-react';
 import { formatINR } from '@rentease/shared';
+import { useRouter } from 'next/navigation';
 
 export default function HomePage() {
+  const router = useRouter();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [testInput, setTestInput] = useState('');
   const [inputError, setInputError] = useState('');
@@ -29,7 +31,8 @@ export default function HomePage() {
       return;
     }
     setInputError('');
-    success(`Pincode "${testInput}" registered for service check.`, 'Serviceability Query');
+    success(`Checking catalog for pincode "${testInput}".`, 'Serviceability Query');
+    router.push(`/catalog?pincode=${encodeURIComponent(testInput.trim())}`);
   };
 
   return (

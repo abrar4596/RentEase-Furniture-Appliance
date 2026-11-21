@@ -7,7 +7,10 @@ import {
 
 export const tenureTierSchema = z.object({
   tenureMonths: z.union([z.literal(1), z.literal(3), z.literal(6), z.literal(12)]),
-  monthlyRentPaise: z.number().int().positive('Monthly rent must be a positive integer in paise'),
+  monthlyRentPaise: z
+    .number()
+    .int()
+    .positive({ message: 'Monthly rent must be a positive integer in paise' }),
 });
 
 export const productImageSchema = z.object({
@@ -21,7 +24,7 @@ export const createProductSchema = z.object({
   subcategory: z.string().trim().min(2, 'Subcategory is required'),
   title: z.string().trim().min(3, 'Title must be at least 3 characters').max(200),
   description: z.string().trim().min(10, 'Description must be at least 10 characters'),
-  specs: z.record(z.string()).default({}),
+  specs: z.record(z.string(), z.string()).default({}),
   images: z.array(productImageSchema).min(1, 'At least one product image is required'),
   condition: z.enum([
     PRODUCT_CONDITIONS.BRAND_NEW,

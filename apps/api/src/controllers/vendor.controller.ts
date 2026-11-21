@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { vendorService } from '../services/vendor.service.js';
 import { UnauthorizedError } from '../middleware/error-handler.js';
 import { VendorStatus } from '@rentease/shared';
+import { adminService } from '../services/admin.service.js';
 
 export class VendorController {
   public async getMyProfile(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -58,8 +59,17 @@ export class VendorController {
 
   public async adminVerifyVendor(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
+      if (!req.user) throw new UnauthorizedError('Authentication required');
       const id = req.params.id as string;
       const profile = await vendorService.adminVerifyVendor(id, req.body);
+      await adminService.recordAudit(
+        req.user._id.toString(),
+        'VENDOR_VERIFICATION_UPDATED',
+        'vendor',
+        id,
+        req.body.rejectionReason,
+        { status: req.body.status }
+      );
       res.status(200).json({
         success: true,
         data: { profile },

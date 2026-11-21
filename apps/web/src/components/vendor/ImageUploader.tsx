@@ -12,9 +12,15 @@ interface ImageUploaderProps {
   images: ProductImage[];
   onChange: (images: ProductImage[]) => void;
   maxImages?: number;
+  uploadFolder?: 'products' | 'kyc' | 'maintenance';
 }
 
-export function ImageUploader({ images, onChange, maxImages = 5 }: ImageUploaderProps) {
+export function ImageUploader({
+  images,
+  onChange,
+  maxImages = 5,
+  uploadFolder = 'products',
+}: ImageUploaderProps) {
   const { accessToken } = useAuth();
   const { error: toastError, success: toastSuccess } = useToast();
   const [isUploading, setIsUploading] = useState(false);
@@ -48,7 +54,7 @@ export function ImageUploader({ images, onChange, maxImages = 5 }: ImageUploader
           'Content-Type': 'application/json',
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({ folder: 'products' }),
+        body: JSON.stringify({ folder: uploadFolder }),
       });
 
       const sigData = await sigRes.json();

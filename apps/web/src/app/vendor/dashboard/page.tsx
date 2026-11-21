@@ -19,10 +19,12 @@ import {
   IVendorProfile,
   IProduct,
   ICity,
+  IOrder,
   PRODUCT_STATUSES,
   VENDOR_STATUSES,
   ProductStatus,
   formatINR,
+  IVendorLedgerEntry,
 } from '@rentease/shared';
 import {
   Store,
@@ -40,6 +42,7 @@ import {
   TrendingUp,
   RefreshCw,
   Search,
+  Truck,
 } from 'lucide-react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
@@ -79,6 +82,10 @@ function VendorDashboardContent() {
 
   // Quick Stock Edit State
   const [updatingStockId, setUpdatingStockId] = useState<string | null>(null);
+  const [fulfillmentOrders, setFulfillmentOrders] = useState<IOrder[]>([]);
+  const [isLoadingFulfillment, setIsLoadingFulfillment] = useState(false);
+  const [ledgerEntries, setLedgerEntries] = useState<IVendorLedgerEntry[]>([]);
+  const [pendingPayoutPaise, setPendingPayoutPaise] = useState(0);
 
   // Fetch Cities
   const fetchCities = useCallback(async () => {
@@ -145,6 +152,87 @@ function VendorDashboardContent() {
     }
   }, [accessToken, vendorProfile, toastError]);
 
+  const fetchFulfillmentOrders = useCallback(async () => {
+    if (!accessToken || !vendorProfile) return;
+    setIsLoadingFulfillment(true);
+    try {
+      const res = await fetch(`${API_BASE}/orders/vendor/mine`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await res.json();
+      if (res.ok && data.success) setFulfillmentOrders(data.data.orders);
+    } catch {
+      toastError('Error', 'Failed to load fulfillment orders');
+    } finally {
+      setIsLoadingFulfillment(false);
+    }
+  }, [accessToken, vendorProfile, toastError]);
+
+  const fetchLedger = useCallback(async () => {
+    if (!accessToken || !vendorProfile) return;
+    try {
+      const res = await fetch(`${API_BASE}/payouts/ledger`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setLedgerEntries(data.data.entries);
+        setPendingPayoutPaise(data.data.pendingPaise);
+      }
+    } catch {
+      toastError('Error', 'Failed to load payout ledger');
+    }
+  }, [accessToken, vendorProfile, toastError]);
+
+  const updateFulfillmentStatus = async (
+    orderId: string,
+    status: 'OUT_FOR_DELIVERY' | 'ACTIVE'
+  ) => {
+    if (!accessToken) return;
+    try {
+      const res = await fetch(`${API_BASE}/orders/vendor/${orderId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ status }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success)
+        throw new Error(data.error?.message || 'Failed to update order');
+      success('Fulfillment updated', `Order moved to ${status.replaceAll('_', ' ')}`);
+      fetchFulfillmentOrders();
+    } catch (error) {
+      toastError(
+        'Update failed',
+        error instanceof Error ? error.message : 'Could not update order'
+      );
+    }
+  };
+
+  const completeReturn = async (orderId: string) => {
+    if (!accessToken) return;
+    try {
+      const res = await fetch(`${API_BASE}/orders/vendor/${orderId}/return`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          damageDescription: undefined,
+          damagePhotos: [],
+          damageDeductionPaise: 0,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success)
+        throw new Error(data.error?.message || 'Failed to complete return');
+      success('Return completed', 'Inventory has been restored');
+      fetchFulfillmentOrders();
+    } catch (error) {
+      toastError(
+        'Return failed',
+        error instanceof Error ? error.message : 'Could not complete return'
+      );
+    }
+  };
+
   useEffect(() => {
     fetchCities();
   }, [fetchCities]);
@@ -156,8 +244,10 @@ function VendorDashboardContent() {
   useEffect(() => {
     if (vendorProfile) {
       fetchProducts();
+      fetchFulfillmentOrders();
+      fetchLedger();
     }
-  }, [vendorProfile, fetchProducts]);
+  }, [vendorProfile, fetchProducts, fetchFulfillmentOrders, fetchLedger]);
 
   // Handle Onboarding Submission
   const handleCreateProfile = async (e: React.FormEvent) => {
@@ -522,7 +612,112 @@ function VendorDashboardContent() {
           </div>
           <p className="text-2xl font-bold text-gray-900 mt-2">{totalStockUnits}</p>
         </Card>
+
+        <Card className="p-4 border-emerald-200 bg-emerald-50/50">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
+              Pending Payout
+            </span>
+            <TrendingUp className="h-4 w-4 text-emerald-600" />
+          </div>
+          <p className="text-2xl font-bold text-emerald-700 mt-2">
+            {formatINR(pendingPayoutPaise)}
+          </p>
+          <p className="mt-1 text-xs text-gray-500">{ledgerEntries.length} ledger entry(s)</p>
+        </Card>
       </div>
+
+      {/* Fulfillment Queue */}
+      <Card className="border-gray-200 shadow-sm overflow-hidden">
+        <CardHeader className="border-b border-gray-100 bg-gray-50/50 p-4 sm:p-5">
+          <div>
+            <CardTitle className="text-lg font-bold text-gray-900">Fulfillment Queue</CardTitle>
+            <CardDescription className="text-xs text-gray-500">
+              Manage confirmed orders through delivery and activation.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {isLoadingFulfillment ? (
+            <div className="p-8 text-center text-sm text-gray-500">
+              Loading fulfillment orders...
+            </div>
+          ) : fulfillmentOrders.length === 0 ? (
+            <div className="p-8 text-center text-sm text-gray-500">
+              <Truck className="mx-auto mb-2 h-8 w-8 text-gray-300" />
+              No confirmed or active rental orders.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-gray-200 bg-gray-50 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                  <tr>
+                    <th className="px-4 py-3">Order</th>
+                    <th className="px-4 py-3">Customer</th>
+                    <th className="px-4 py-3">Delivery</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {fulfillmentOrders.map((order) => (
+                    <tr key={order.id} className="hover:bg-gray-50/70">
+                      <td className="px-4 py-3.5">
+                        <p className="font-semibold text-gray-900">#{order.id.slice(-8)}</p>
+                        <p className="text-xs text-gray-500">{order.items.length} item(s)</p>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <p className="font-medium text-gray-900">
+                          {order.deliveryAddress.fullName}
+                        </p>
+                        <p className="text-xs text-gray-500">{order.deliveryAddress.phone}</p>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <p className="text-xs text-gray-700">{order.preferredDeliveryDate}</p>
+                        <p className="text-xs capitalize text-gray-500">
+                          {order.preferredDeliverySlot}
+                        </p>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                          {order.status.replaceAll('_', ' ')}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 text-right">
+                        {order.status === 'CONFIRMED' && (
+                          <Button
+                            size="sm"
+                            onClick={() => updateFulfillmentStatus(order.id, 'OUT_FOR_DELIVERY')}
+                          >
+                            Mark Out for Delivery
+                          </Button>
+                        )}
+                        {order.status === 'OUT_FOR_DELIVERY' && (
+                          <Button
+                            size="sm"
+                            onClick={() => updateFulfillmentStatus(order.id, 'ACTIVE')}
+                          >
+                            Mark Delivered
+                          </Button>
+                        )}
+                        {order.status === 'RETURN_REQUESTED' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => completeReturn(order.id)}
+                          >
+                            Complete Return
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Product Catalog Table Section */}
       <Card className="border-gray-200 shadow-sm overflow-hidden">

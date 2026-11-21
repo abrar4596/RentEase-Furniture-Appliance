@@ -4,6 +4,35 @@ import { UnauthorizedError } from '../middleware/error-handler.js';
 import { ProductStatus, ProductCategory } from '@rentease/shared';
 
 export class ProductController {
+  public async listCatalog(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const page = req.query.page ? Number(req.query.page) : 1;
+      const limit = req.query.limit ? Number(req.query.limit) : 20;
+      const inStock = req.query.inStock === 'false' ? false : true;
+      const result = await productService.listCatalog({
+        cityId: typeof req.query.cityId === 'string' ? req.query.cityId : undefined,
+        pincode: typeof req.query.pincode === 'string' ? req.query.pincode : undefined,
+        category:
+          typeof req.query.category === 'string'
+            ? (req.query.category as ProductCategory)
+            : undefined,
+        subcategory: typeof req.query.subcategory === 'string' ? req.query.subcategory : undefined,
+        search:
+          typeof req.query.search === 'string'
+            ? req.query.search
+            : typeof req.query.q === 'string'
+              ? req.query.q
+              : undefined,
+        inStock,
+        page: Number.isFinite(page) ? page : 1,
+        limit: Number.isFinite(limit) ? limit : 20,
+      });
+      res.status(200).json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   public async createProduct(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       if (!req.user) throw new UnauthorizedError('Authentication required');

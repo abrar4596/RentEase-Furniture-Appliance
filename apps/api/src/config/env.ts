@@ -18,6 +18,12 @@ const envSchema = z.object({
   CLOUDINARY_CLOUD_NAME: z.string().default('rentease_test_cloud'),
   CLOUDINARY_API_KEY: z.string().default('test_api_key_123456789'),
   CLOUDINARY_API_SECRET: z.string().default('test_api_secret_abcdefghijk'),
+  RAZORPAY_KEY_ID: z.string().default('rzp_test_placeholder_key_id'),
+  RAZORPAY_KEY_SECRET: z.string().default('rzp_test_placeholder_key_secret'),
+  RAZORPAY_WEBHOOK_SECRET: z.string().default('rzp_test_webhook_secret_key'),
+  PLATFORM_COMMISSION_PERCENT: z.coerce.number().min(0).max(100).default(15),
+  KYC_WINDOW_HOURS: z.coerce.number().int().min(1).max(168).default(24),
+  RESERVATION_TTL_MINUTES: z.coerce.number().int().min(5).max(60).default(15),
 });
 
 const parsed = envSchema.safeParse(process.env);

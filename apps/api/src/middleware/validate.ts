@@ -15,10 +15,10 @@ export function validate(schemas: RequestValidationSchemas) {
         req.body = schemas.body.parse(req.body);
       }
       if (schemas.query) {
-        req.query = schemas.query.parse(req.query);
+        req.query = schemas.query.parse(req.query) as typeof req.query;
       }
       if (schemas.params) {
-        req.params = schemas.params.parse(req.params);
+        req.params = schemas.params.parse(req.params) as typeof req.params;
       }
       next();
     } catch (err: unknown) {
@@ -31,7 +31,7 @@ export function validate(schemas: RequestValidationSchemas) {
 
       if (isZod) {
         const zodErr = err as ZodError;
-        const details = (zodErr.errors || zodErr.issues || []).map((e) => ({
+        const details = zodErr.issues.map((e) => ({
           path: e.path.join('.'),
           message: e.message,
         }));

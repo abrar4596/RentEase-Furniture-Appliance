@@ -43,7 +43,9 @@ export class VendorService {
     }
 
     // Verify all requested pincodes belong to the selected city
-    const invalidPincodes = input.servicePincodes.filter((pin) => !city.pincodes.includes(pin));
+    const invalidPincodes = input.servicePincodes.filter(
+      (pin: string) => !city.pincodes.includes(pin)
+    );
     if (invalidPincodes.length > 0) {
       throw new ValidationError(
         `The following pincodes do not belong to ${city.name}: ${invalidPincodes.join(', ')}`
@@ -82,7 +84,9 @@ export class VendorService {
     if (input.servicePincodes) {
       const city = await City.findById(profile.cityId);
       if (city) {
-        const invalidPincodes = input.servicePincodes.filter((pin) => !city.pincodes.includes(pin));
+        const invalidPincodes = input.servicePincodes.filter(
+          (pin: string) => !city.pincodes.includes(pin)
+        );
         if (invalidPincodes.length > 0) {
           throw new ValidationError(
             `The following pincodes do not belong to ${city.name}: ${invalidPincodes.join(', ')}`

@@ -14,6 +14,102 @@ import { City } from '../models/city.model.js';
 import { NotFoundError, ForbiddenError, ValidationError } from '../middleware/error-handler.js';
 
 export class ProductService {
+  public async listCatalog(filters: {
+    cityId?: string;
+    pincode?: string;
+    category?: ProductCategory;
+    subcategory?: string;
+    search?: string;
+    inStock?: boolean;
+    page?: number;
+    limit?: number;
+  }): Promise<{
+    products: IProduct[];
+    pagination: { page: number; limit: number; total: number; totalPages: number };
+  }> {
+    const query: Record<string, unknown> = { status: PRODUCT_STATUSES.ACTIVE };
+
+    if (filters.category) {
+      query.category = filters.category;
+    }
+    if (filters.subcategory) {
+      query.subcategory = filters.subcategory;
+    }
+    if (filters.inStock !== false) {
+      query.stockCount = { $gt: 0 };
+    }
+    if (filters.cityId) {
+      query.cityId = new mongoose.Types.ObjectId(filters.cityId);
+    } else if (filters.pincode) {
+      const city = await City.findOne({ isActive: true, pincodes: filters.pincode });
+      if (!city) {
+        return {
+          products: [],
+          pagination: {
+            page: filters.page ?? 1,
+            limit: filters.limit ?? 20,
+            total: 0,
+            totalPages: 0,
+          },
+        };
+      }
+      query.cityId = city._id;
+
+      const matchingVendors = await VendorProfile.find({
+        verificationStatus: VENDOR_STATUSES.APPROVED,
+        servicePincodes: filters.pincode,
+      }).select('_id');
+      if (matchingVendors.length > 0) {
+        query.vendorId = { $in: matchingVendors.map((vendor) => vendor._id) };
+      }
+    }
+    if (filters.search?.trim()) {
+      const escaped = filters.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      query.$or = [
+        { title: { $regex: escaped, $options: 'i' } },
+        { description: { $regex: escaped, $options: 'i' } },
+        { subcategory: { $regex: escaped, $options: 'i' } },
+      ];
+    }
+
+    const page = Math.max(1, filters.page ?? 1);
+    const limit = Math.min(100, Math.max(1, filters.limit ?? 20));
+    const [products, total] = await Promise.all([
+      Product.find(query)
+        .sort({ updatedAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit),
+      Product.countDocuments(query),
+    ]);
+
+    const vendorIds = [...new Set(products.map((product) => product.vendorId.toString()))];
+    const cityIds = [...new Set(products.map((product) => product.cityId.toString()))];
+    const [vendors, cities] = await Promise.all([
+      VendorProfile.find({ _id: { $in: vendorIds } }),
+      City.find({ _id: { $in: cityIds } }),
+    ]);
+    const vendorNames = new Map(
+      vendors.map((vendor) => [vendor._id.toString(), vendor.businessName])
+    );
+    const cityNames = new Map(cities.map((city) => [city._id.toString(), city.name]));
+
+    return {
+      products: products.map((product) =>
+        formatProduct(
+          product,
+          vendorNames.get(product.vendorId.toString()),
+          cityNames.get(product.cityId.toString())
+        )
+      ),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
   /**
    * Creates a product listing for an authenticated vendor.
    * Only APPROVED vendors can publish directly to 'active'; PENDING vendors are constrained to 'draft'.
@@ -204,6 +300,9 @@ export class ProductService {
     const product = await Product.findById(productId);
     if (!product) {
       throw new NotFoundError('Product not found');
+    }
+    if (product.status !== PRODUCT_STATUSES.ACTIVE || product.stockCount <= 0) {
+      throw new NotFoundError('Product not found or is no longer available');
     }
 
     const vendor = await VendorProfile.findById(product.vendorId);

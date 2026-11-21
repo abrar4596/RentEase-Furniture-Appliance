@@ -12,6 +12,9 @@ import { validate } from '../middleware/validate.js';
 
 export const productRouter = Router();
 
+// Public catalog
+productRouter.get('/catalog', productController.listCatalog);
+
 // Vendor Product Management
 productRouter.post(
   '/',

@@ -69,7 +69,7 @@ export function errorHandler(
 
   if (isZod) {
     const zodErr = err as ZodError;
-    const details = (zodErr.errors || zodErr.issues || []).map((e) => ({
+    const details = zodErr.issues.map((e: { path: PropertyKey[]; message: string }) => ({
       path: e.path.join('.'),
       message: e.message,
     }));

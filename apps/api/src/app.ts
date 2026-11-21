@@ -12,6 +12,12 @@ import { cityRouter } from './routes/city.routes.js';
 import { vendorRouter } from './routes/vendor.routes.js';
 import { productRouter } from './routes/product.routes.js';
 import { uploadRouter } from './routes/upload.routes.js';
+import { catalogRouter } from './routes/catalog.routes.js';
+import { cartRouter } from './routes/cart.routes.js';
+import { checkoutRouter } from './routes/checkout.routes.js';
+import { orderRouter } from './routes/order.routes.js';
+import { payoutRouter } from './routes/payout.routes.js';
+import { adminRouter } from './routes/admin.routes.js';
 
 export function createApp(): Express {
   const app = express();
@@ -52,7 +58,14 @@ export function createApp(): Express {
   app.use('/api/', limiter);
 
   // Body parser with payload size limit
-  app.use(express.json({ limit: '1mb' }));
+  app.use(
+    express.json({
+      limit: '1mb',
+      verify: (req, _res, body) => {
+        (req as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(body);
+      },
+    })
+  );
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
   // Routes
@@ -62,7 +75,13 @@ export function createApp(): Express {
   app.use('/api/v1/cities', cityRouter);
   app.use('/api/v1/vendors', vendorRouter);
   app.use('/api/v1/products', productRouter);
+  app.use('/api/v1/catalog', catalogRouter);
+  app.use('/api/v1/cart', cartRouter);
+  app.use('/api/v1/orders', orderRouter);
+  app.use('/api/v1/payments', checkoutRouter);
   app.use('/api/v1/uploads', uploadRouter);
+  app.use('/api/v1/payouts', payoutRouter);
+  app.use('/api/v1/admin', adminRouter);
 
   // 404 Handler
   app.use((_req, _res, next) => {

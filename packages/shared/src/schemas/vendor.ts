@@ -28,3 +28,17 @@ export const adminVerifyVendorSchema = z.object({
 });
 
 export type AdminVerifyVendorInput = z.infer<typeof adminVerifyVendorSchema>;
+
+export const markVendorPayoutSchema = z.object({
+  vendorId: z.string().min(1),
+  ledgerEntryIds: z.array(z.string().min(1)).min(1),
+  payoutReference: z.string().trim().min(3).max(200),
+});
+
+export type MarkVendorPayoutInput = z.infer<typeof markVendorPayoutSchema>;
+
+export const updatePlatformSettingsSchema = z.object({
+  platformCommissionPercent: z.number().min(0).max(100).optional(),
+  kycWindowHours: z.number().int().min(1).max(168).optional(),
+  reservationTtlMinutes: z.number().int().min(5).max(60).optional(),
+});
