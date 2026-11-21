@@ -8,6 +8,10 @@ import { requestIdMiddleware } from './middleware/request-id.js';
 import { errorHandler, NotFoundError } from './middleware/error-handler.js';
 import { healthRouter } from './routes/health.js';
 import { authRouter } from './routes/auth.routes.js';
+import { cityRouter } from './routes/city.routes.js';
+import { vendorRouter } from './routes/vendor.routes.js';
+import { productRouter } from './routes/product.routes.js';
+import { uploadRouter } from './routes/upload.routes.js';
 
 export function createApp(): Express {
   const app = express();
@@ -55,6 +59,10 @@ export function createApp(): Express {
   app.use('/', healthRouter);
   app.use('/api/v1', healthRouter);
   app.use('/api/v1/auth', authRouter);
+  app.use('/api/v1/cities', cityRouter);
+  app.use('/api/v1/vendors', vendorRouter);
+  app.use('/api/v1/products', productRouter);
+  app.use('/api/v1/uploads', uploadRouter);
 
   // 404 Handler
   app.use((_req, _res, next) => {

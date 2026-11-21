@@ -15,6 +15,9 @@ const envSchema = z.object({
   COOKIE_SECRET: z.string().min(16).default('dev_cookie_secret_at_least_16_chars!'),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(15 * 60 * 1000), // 15 mins
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(100),
+  CLOUDINARY_CLOUD_NAME: z.string().default('rentease_test_cloud'),
+  CLOUDINARY_API_KEY: z.string().default('test_api_key_123456789'),
+  CLOUDINARY_API_SECRET: z.string().default('test_api_secret_abcdefghijk'),
 });
 
 const parsed = envSchema.safeParse(process.env);
