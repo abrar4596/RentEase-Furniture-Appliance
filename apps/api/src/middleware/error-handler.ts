@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { ZodError } from 'zod';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 
@@ -15,6 +16,7 @@ export class AppError extends Error {
     this.code = code;
     this.isOperational = true;
     this.details = details;
+    Object.setPrototypeOf(this, new.target.prototype);
     Error.captureStackTrace(this, this.constructor);
   }
 }
@@ -57,25 +59,59 @@ export function errorHandler(
 ): void {
   const reqId = (req as unknown as { id?: string }).id ?? 'unknown';
 
-  if (err instanceof AppError && err.isOperational) {
+  // Handle direct Zod errors
+  const isZod =
+    err instanceof ZodError ||
+    (typeof err === 'object' &&
+      err !== null &&
+      'name' in err &&
+      (err as { name: string }).name === 'ZodError');
+
+  if (isZod) {
+    const zodErr = err as ZodError;
+    const details = (zodErr.errors || zodErr.issues || []).map((e) => ({
+      path: e.path.join('.'),
+      message: e.message,
+    }));
+
+    res.status(400).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Request validation failed',
+        details,
+      },
+    });
+    return;
+  }
+
+  const isOperational =
+    err instanceof AppError ||
+    (typeof err === 'object' &&
+      err !== null &&
+      'isOperational' in err &&
+      Boolean((err as AppError).isOperational));
+
+  if (isOperational) {
+    const appErr = err as AppError;
     logger.warn(
       {
         requestId: reqId,
-        code: err.code,
-        statusCode: err.statusCode,
-        message: err.message,
+        code: appErr.code,
+        statusCode: appErr.statusCode,
+        message: appErr.message,
         path: req.path,
         method: req.method,
       },
-      `Operational error: ${err.message}`
+      `Operational error: ${appErr.message}`
     );
 
-    res.status(err.statusCode).json({
+    res.status(appErr.statusCode || 400).json({
       success: false,
       error: {
-        code: err.code,
-        message: err.message,
-        ...(err.details ? { details: err.details } : {}),
+        code: appErr.code,
+        message: appErr.message,
+        ...(appErr.details ? { details: appErr.details } : {}),
       },
     });
     return;

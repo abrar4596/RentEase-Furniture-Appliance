@@ -1,11 +1,13 @@
 import express, { Express } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { env } from './config/env.js';
 import { requestIdMiddleware } from './middleware/request-id.js';
 import { errorHandler, NotFoundError } from './middleware/error-handler.js';
 import { healthRouter } from './routes/health.js';
+import { authRouter } from './routes/auth.routes.js';
 
 export function createApp(): Express {
   const app = express();
@@ -26,10 +28,13 @@ export function createApp(): Express {
   // Correlation request ID tracking
   app.use(requestIdMiddleware);
 
-  // Rate Limiting
+  // Cookie Parser
+  app.use(cookieParser(env.COOKIE_SECRET));
+
+  // Global Rate Limiting
   const limiter = rateLimit({
     windowMs: env.RATE_LIMIT_WINDOW_MS,
-    max: env.RATE_LIMIT_MAX_REQUESTS,
+    max: env.NODE_ENV === 'test' ? 10000 : env.RATE_LIMIT_MAX_REQUESTS,
     standardHeaders: true,
     legacyHeaders: false,
     message: {
@@ -49,6 +54,7 @@ export function createApp(): Express {
   // Routes
   app.use('/', healthRouter);
   app.use('/api/v1', healthRouter);
+  app.use('/api/v1/auth', authRouter);
 
   // 404 Handler
   app.use((_req, _res, next) => {
