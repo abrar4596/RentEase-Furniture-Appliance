@@ -97,11 +97,38 @@ Run scripts from the monorepo root:
 
 ---
 
-## API Reference (Phase 0)
+## API Reference
 
-| Method | Endpoint  | Auth   | Description                               | Response Envelope                                                  |
-| :----- | :-------- | :----- | :---------------------------------------- | :----------------------------------------------------------------- |
-| `GET`  | `/health` | Public | System uptime & MongoDB connection status | `{ success: true, data: { status: "OK", timestamp, uptime, db } }` |
+### Health & Monitoring
+
+| Method | Endpoint         | Auth   | Description                               | Response Envelope                                                  |
+| :----- | :--------------- | :----- | :---------------------------------------- | :----------------------------------------------------------------- |
+| `GET`  | `/health`        | Public | System uptime & MongoDB connection status | `{ success: true, data: { status: "OK", timestamp, uptime, db } }` |
+| `GET`  | `/api/v1/health` | Public | Versioned health check                    | `{ success: true, data: { status: "OK", timestamp, uptime, db } }` |
+
+### Authentication & RBAC (Phase 1)
+
+| Method | Endpoint                       | Auth          | Description                                                        | Body / Payload                                                   |
+| :----- | :----------------------------- | :------------ | :----------------------------------------------------------------- | :--------------------------------------------------------------- |
+| `POST` | `/api/v1/auth/register`        | Public        | Register new Renter or Local Vendor                                | `{ email, password, name, phone?, role?: "renter" \| "vendor" }` |
+| `POST` | `/api/v1/auth/login`           | Public        | Authenticate user & receive access token + httpOnly refresh cookie | `{ email, password }`                                            |
+| `POST` | `/api/v1/auth/refresh`         | Public        | Rotate refresh token & receive new access token                    | Cookie: `refreshToken`                                           |
+| `POST` | `/api/v1/auth/logout`          | Public        | Revoke current refresh token & clear cookie                        | Cookie: `refreshToken`                                           |
+| `POST` | `/api/v1/auth/logout-all`      | Authenticated | Revoke all active sessions across all devices                      | Header: `Authorization: Bearer <token>`                          |
+| `GET`  | `/api/v1/auth/me`              | Authenticated | Retrieve current user profile                                      | Header: `Authorization: Bearer <token>`                          |
+| `POST` | `/api/v1/auth/forgot-password` | Public        | Request password reset token                                       | `{ email }`                                                      |
+| `POST` | `/api/v1/auth/reset-password`  | Public        | Reset password using valid token                                   | `{ token, newPassword }`                                         |
+| `POST` | `/api/v1/auth/google`          | Public        | Google OAuth 2.0 exchange & login/link                             | `{ credential }`                                                 |
+
+---
+
+## Admin Seeding
+
+Platform Admins cannot be registered via public endpoints. Seed the initial admin account via CLI:
+
+```bash
+ADMIN_EMAIL=admin@rentease.in ADMIN_PASSWORD=RentEase@Admin2026 npm run seed:admin -w @rentease/api
+```
 
 ---
 
