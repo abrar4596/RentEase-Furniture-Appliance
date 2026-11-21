@@ -1,0 +1,68 @@
+import { z } from 'zod';
+
+export const ORDER_STATES = {
+  PENDING_PAYMENT: 'PENDING_PAYMENT',
+  PENDING_KYC: 'PENDING_KYC',
+  CONFIRMED: 'CONFIRMED',
+  OUT_FOR_DELIVERY: 'OUT_FOR_DELIVERY',
+  ACTIVE: 'ACTIVE',
+  RETURN_REQUESTED: 'RETURN_REQUESTED',
+  RETURNED: 'RETURNED',
+  CLOSED: 'CLOSED',
+  CANCELLED: 'CANCELLED',
+  KYC_REJECTED: 'KYC_REJECTED',
+  REFUNDED: 'REFUNDED',
+} as const;
+
+export type OrderState = (typeof ORDER_STATES)[keyof typeof ORDER_STATES];
+
+export const orderStateSchema = z.enum([
+  ORDER_STATES.PENDING_PAYMENT,
+  ORDER_STATES.PENDING_KYC,
+  ORDER_STATES.CONFIRMED,
+  ORDER_STATES.OUT_FOR_DELIVERY,
+  ORDER_STATES.ACTIVE,
+  ORDER_STATES.RETURN_REQUESTED,
+  ORDER_STATES.RETURNED,
+  ORDER_STATES.CLOSED,
+  ORDER_STATES.CANCELLED,
+  ORDER_STATES.KYC_REJECTED,
+  ORDER_STATES.REFUNDED,
+]);
+
+/**
+ * Strict state machine transition rules for RentEase orders.
+ * Key: Current State -> Value: Allowed Next States.
+ */
+export const VALID_ORDER_TRANSITIONS: Record<OrderState, readonly OrderState[]> = {
+  [ORDER_STATES.PENDING_PAYMENT]: [ORDER_STATES.PENDING_KYC, ORDER_STATES.CANCELLED],
+  [ORDER_STATES.PENDING_KYC]: [
+    ORDER_STATES.CONFIRMED,
+    ORDER_STATES.KYC_REJECTED,
+    ORDER_STATES.CANCELLED,
+  ],
+  [ORDER_STATES.CONFIRMED]: [ORDER_STATES.OUT_FOR_DELIVERY, ORDER_STATES.CANCELLED],
+  [ORDER_STATES.OUT_FOR_DELIVERY]: [ORDER_STATES.ACTIVE, ORDER_STATES.CANCELLED],
+  [ORDER_STATES.ACTIVE]: [ORDER_STATES.RETURN_REQUESTED],
+  [ORDER_STATES.RETURN_REQUESTED]: [ORDER_STATES.RETURNED],
+  [ORDER_STATES.RETURNED]: [ORDER_STATES.CLOSED, ORDER_STATES.REFUNDED],
+  [ORDER_STATES.KYC_REJECTED]: [
+    ORDER_STATES.PENDING_KYC, // Allows 1-step resubmission within review window
+    ORDER_STATES.REFUNDED,
+    ORDER_STATES.CANCELLED,
+  ],
+  [ORDER_STATES.CANCELLED]: [ORDER_STATES.REFUNDED, ORDER_STATES.CLOSED],
+  [ORDER_STATES.REFUNDED]: [ORDER_STATES.CLOSED],
+  [ORDER_STATES.CLOSED]: [], // Terminal state
+} as const;
+
+export function canTransitionOrder(from: OrderState, to: OrderState): boolean {
+  const allowed = VALID_ORDER_TRANSITIONS[from];
+  return allowed ? allowed.includes(to) : false;
+}
+
+export function assertValidOrderTransition(from: OrderState, to: OrderState): void {
+  if (!canTransitionOrder(from, to)) {
+    throw new Error(`Invalid order state transition from '${from}' to '${to}'`);
+  }
+}
