@@ -241,3 +241,5 @@ For production environments, copy `.env.example` to the hosting-provider secret 
 - **Vendor Approval Invariant:** Only vendors with `verificationStatus === 'APPROVED'` can publish products with `status === 'active'`. Pending or rejected vendors are strictly restricted to `status === 'draft'`.
 - **Vendor Ownership Invariant:** A vendor can only view, update, pause, change stock, or delete their own inventory. Enforced in `productService` by validating `product.vendorId === vendor._id`.
 - **Signed Cloudinary Uploads:** Image uploads use short-lived signatures generated server-side. Direct, unauthenticated image writes to Cloudinary are prohibited.
+#   R e n t E a s e - F u r n i t u r e - A p p l i a n c e  
+ 

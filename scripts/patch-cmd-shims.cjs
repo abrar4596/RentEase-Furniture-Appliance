@@ -11,8 +11,8 @@ function patchDirectory(dir) {
     } else if (entry.name.endsWith('.cmd')) {
       try {
         let content = fs.readFileSync(fullPath, 'utf8');
-        if (content.includes('SET dp0=%~dp0')) {
-          content = content.replace(/SET dp0=%~dp0/g, 'SET "dp0=%~dp0"');
+        if (/^SET dp0=%~dp0$/m.test(content)) {
+          content = content.replace(/^SET dp0=%~dp0$/gm, 'SET "dp0=%~dp0"');
           fs.writeFileSync(fullPath, content, 'utf8');
         }
       } catch (e) {
