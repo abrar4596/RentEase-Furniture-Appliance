@@ -10,7 +10,7 @@
   "scripts": {
     "postinstall": "node scripts/patch-cmd-shims.cjs",
     "dev": "concurrently -k -p \"[{name}]\" -n \"API,WEB\" -c \"blue.bold,magenta.bold\" \"npm run dev -w @rentease/api\" \"npm run dev -w @rentease/web\"",
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspace=@rentease/api && npm run build --workspace=@rentease/web",
     "test": "npm run test --workspaces --if-present",
     "test:coverage": "npm run test:coverage --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",

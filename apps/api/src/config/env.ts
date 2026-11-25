@@ -26,14 +26,66 @@ const envSchema = z.object({
   RESERVATION_TTL_MINUTES: z.coerce.number().int().min(5).max(60).default(15),
 });
 
-const parsed = envSchema.safeParse(process.env);
+const nonPlaceholder = z
+  .string()
+  .min(1)
+  .refine(
+    (value) => !value.toLowerCase().includes('placeholder'),
+    'Must not be a placeholder value'
+  );
 
-if (!parsed.success) {
+const productionEnvSchema = z.object({
+  MONGODB_URI: z.string().min(1),
+  CORS_ORIGIN: z.string().url(),
+  JWT_ACCESS_SECRET: z
+    .string()
+    .min(32)
+    .refine((value) => !value.startsWith('dev_'), 'Must not use a development secret'),
+  JWT_REFRESH_SECRET: z
+    .string()
+    .min(32)
+    .refine((value) => !value.startsWith('dev_'), 'Must not use a development secret'),
+  COOKIE_SECRET: z
+    .string()
+    .min(32)
+    .refine((value) => !value.startsWith('dev_'), 'Must not use a development secret'),
+  CLOUDINARY_CLOUD_NAME: nonPlaceholder.refine(
+    (value) => value !== 'rentease_test_cloud',
+    'Must not use the example Cloudinary cloud'
+  ),
+  CLOUDINARY_API_KEY: nonPlaceholder.refine(
+    (value) => value !== 'test_api_key_123456789',
+    'Must not use the example Cloudinary API key'
+  ),
+  CLOUDINARY_API_SECRET: nonPlaceholder.refine(
+    (value) => value !== 'test_api_secret_abcdefghijk',
+    'Must not use the example Cloudinary API secret'
+  ),
+  RAZORPAY_KEY_ID: nonPlaceholder,
+  RAZORPAY_KEY_SECRET: nonPlaceholder,
+  RAZORPAY_WEBHOOK_SECRET: nonPlaceholder,
+});
+
+function reportInvalidEnvironment(error: z.ZodError): never {
   // eslint-disable-next-line no-console
   console.error('❌ FATAL: Invalid environment variable configuration:');
   // eslint-disable-next-line no-console
-  console.error(JSON.stringify(parsed.error.format(), null, 2));
+  console.error(JSON.stringify(error.format(), null, 2));
   process.exit(1);
 }
 
+const parsed = envSchema.safeParse(process.env);
+
+if (!parsed.success) {
+  reportInvalidEnvironment(parsed.error);
+}
+
+if (parsed.data.NODE_ENV === 'production') {
+  const productionParsed = productionEnvSchema.safeParse(process.env);
+  if (!productionParsed.success) {
+    reportInvalidEnvironment(productionParsed.error);
+  }
+}
+
 export const env = parsed.data;
+export type Env = z.infer<typeof envSchema>;

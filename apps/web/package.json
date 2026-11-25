@@ -5,6 +5,7 @@
   "description": "Next.js mobile-first web frontend for RentEase",
   "scripts": {
     "dev": "next dev -p 3000",
+    "prebuild": "npm run build --workspace=@rentease/shared",
     "build": "next build",
     "start": "next start -p 3000",
     "type-check": "tsc --noEmit",

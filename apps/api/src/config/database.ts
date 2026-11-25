@@ -15,9 +15,10 @@ export async function connectDatabase(): Promise<typeof mongoose | null> {
 
   isConnecting = true;
   try {
-    const conn = await mongoose.connect(env.MONGODB_URI, {
+    const options: mongoose.ConnectOptions = {
       serverSelectionTimeoutMS: env.NODE_ENV === 'test' ? 2000 : 5000,
-    });
+    };
+    const conn = await mongoose.connect(env.MONGODB_URI, options);
     logger.info(
       { uri: env.MONGODB_URI.replace(/\/\/[^@]+@/, '//***@') },
       'Connected to MongoDB Atlas / Local'
