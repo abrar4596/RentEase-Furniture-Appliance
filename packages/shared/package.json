@@ -4,12 +4,20 @@
   "private": true,
   "description": "Shared TypeScript types, Zod schemas, roles, and utilities for RentEase",
   "main": "./dist/index.js",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
+      "module": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js",
+      "module": "./dist/*.js",
+      "default": "./dist/*.js"
     }
   },
   "scripts": {
