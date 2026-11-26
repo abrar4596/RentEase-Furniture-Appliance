@@ -1,4 +1,5 @@
 {
-  "installCommand": "cd ../.. && npm install",
-  "buildCommand": "cd ../.. && npm run build --workspace=@rentease/shared && cd apps/web && next build"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "npm install --prefix ../..",
+  "buildCommand": "npm run build --workspace=@rentease/shared --prefix ../.. && next build"
 }
