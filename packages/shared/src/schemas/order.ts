@@ -57,6 +57,10 @@ export const reviewKycSchema = z
 
 export const updateOrderFulfillmentSchema = z.object({
   status: z.enum(['OUT_FOR_DELIVERY', 'ACTIVE']),
+  /** Optional Cloudinary proof-of-delivery photo. Only accepted when status is ACTIVE. */
+  deliveryPhoto: z
+    .object({ publicId: z.string().min(1), url: z.string().url() })
+    .optional(),
 });
 
 export const maintenanceRequestSchema = z.object({

@@ -18,6 +18,12 @@ export interface IVendorProfile {
   servicePincodes: string[];
   verificationStatus: VendorStatus;
   rejectionReason?: string;
+  /**
+   * Optional per-vendor commission override (0–100).
+   * When absent the platform-wide `PlatformSettings.platformCommissionPercent`
+   * is used instead.
+   */
+  commissionPercent?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -55,5 +61,9 @@ export interface IPlatformSettings {
   platformCommissionPercent: number;
   kycWindowHours: number;
   reservationTtlMinutes: number;
+  /** Maximum number of orders a single date + slot can accept platform-wide. */
+  deliverySlotCapacity: number;
+  /** Delivery blackout dates (YYYY-MM-DD) that cannot be booked. */
+  blackoutDates: string[];
   updatedAt: string;
 }

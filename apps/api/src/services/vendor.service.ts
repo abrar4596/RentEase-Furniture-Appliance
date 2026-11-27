@@ -82,9 +82,16 @@ export class VendorService {
     }
 
     if (input.servicePincodes) {
+      profile.servicePincodes = input.servicePincodes;
+    }
+
+    // Validate the effective pincode set against the effective city. This runs
+    // whenever either field changes so that switching city cannot leave the
+    // vendor servicing pincodes that the city does not cover.
+    if (input.cityId || input.servicePincodes) {
       const city = await City.findById(profile.cityId);
       if (city) {
-        const invalidPincodes = input.servicePincodes.filter(
+        const invalidPincodes = profile.servicePincodes.filter(
           (pin: string) => !city.pincodes.includes(pin)
         );
         if (invalidPincodes.length > 0) {
@@ -93,7 +100,6 @@ export class VendorService {
           );
         }
       }
-      profile.servicePincodes = input.servicePincodes;
     }
 
     if (input.businessName) profile.businessName = input.businessName;
@@ -126,8 +132,19 @@ export class VendorService {
     }
 
     profile.verificationStatus = input.status;
-    if (input.rejectionReason) {
+    // Always keep the rejection reason consistent with the new status: retain
+    // it only on rejection, clear any stale reason on approval/suspension.
+    if (input.status === VENDOR_STATUSES.REJECTED) {
       profile.rejectionReason = input.rejectionReason;
+    } else {
+      profile.rejectionReason = undefined;
+    }
+
+    // Per-vendor commission override — omit means "revert to platform default".
+    if (typeof input.commissionPercent === 'number') {
+      profile.commissionPercent = input.commissionPercent;
+    } else if (input.status === VENDOR_STATUSES.APPROVED) {
+      // On approval without an explicit rate, leave whatever was there (or undefined).
     }
 
     await profile.save();

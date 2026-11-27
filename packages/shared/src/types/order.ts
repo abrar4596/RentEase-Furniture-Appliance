@@ -77,6 +77,8 @@ export interface IOrder {
   kyc?: OrderKyc;
   rentalStartAt?: string;
   rentalEndAt?: string;
+  /** Optional proof-of-delivery photo uploaded by the vendor. */
+  deliveryPhoto?: { publicId: string; url: string };
   maintenanceRequests: MaintenanceRequest[];
   returnRequest?: RentalReturn;
   damageClaim?: DamageClaim;

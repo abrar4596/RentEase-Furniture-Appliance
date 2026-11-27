@@ -11,6 +11,7 @@ import {
   extendTenureSchema,
   returnRequestSchema,
   returnCompleteSchema,
+  createRefundSchema,
 } from '@rentease/shared';
 import { validate } from '../middleware/validate.js';
 import { verifyPaymentSchema } from '@rentease/shared';
@@ -26,6 +27,7 @@ orderRouter.post(
 );
 orderRouter.get('/', authorize(USER_ROLES.RENTER), checkoutController.getOrders);
 orderRouter.get('/vendor/mine', authorize(USER_ROLES.VENDOR), checkoutController.getVendorOrders);
+orderRouter.get('/vendor/:id', authorize(USER_ROLES.VENDOR), checkoutController.getVendorOrder);
 orderRouter.patch(
   '/vendor/:id/status',
   authorize(USER_ROLES.VENDOR),
@@ -45,6 +47,17 @@ orderRouter.patch(
   validate({ body: reviewKycSchema }),
   checkoutController.adminReviewKyc
 );
+orderRouter.post(
+  '/admin/:id/refund',
+  authorize(USER_ROLES.ADMIN),
+  validate({ body: createRefundSchema }),
+  checkoutController.adminRefund
+);
+orderRouter.get(
+  '/admin/:id/payments',
+  authorize(USER_ROLES.ADMIN),
+  checkoutController.adminListPayments
+);
 orderRouter.get('/:id', authorize(USER_ROLES.RENTER), checkoutController.getOrder);
 orderRouter.post('/:id/cancel', authorize(USER_ROLES.RENTER), checkoutController.cancelOrder);
 orderRouter.post(
@@ -53,6 +66,7 @@ orderRouter.post(
   validate({ body: verifyPaymentSchema }),
   checkoutController.verifyPayment
 );
+orderRouter.post('/:id/pay', authorize(USER_ROLES.RENTER), checkoutController.resumePayment);
 orderRouter.post(
   '/:id/kyc',
   authorize(USER_ROLES.RENTER),

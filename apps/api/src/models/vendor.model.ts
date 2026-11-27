@@ -10,6 +10,8 @@ export interface IVendorProfileDocument extends Document<mongoose.Types.ObjectId
   servicePincodes: string[];
   verificationStatus: VendorStatus;
   rejectionReason?: string;
+  /** Optional per-vendor commission override (0–100). Falls back to platform default. */
+  commissionPercent?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -54,6 +56,12 @@ const vendorProfileSchema = new Schema<IVendorProfileDocument>(
       type: String,
       trim: true,
     },
+    commissionPercent: {
+      type: Number,
+      min: 0,
+      max: 100,
+      // Intentionally no `required` or `default` — absence means "use platform default".
+    },
   },
   {
     timestamps: true,
@@ -74,6 +82,7 @@ export function formatVendorProfile(
     servicePincodes: doc.servicePincodes,
     verificationStatus: doc.verificationStatus,
     rejectionReason: doc.rejectionReason,
+    commissionPercent: doc.commissionPercent,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };

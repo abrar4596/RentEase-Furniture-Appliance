@@ -39,4 +39,5 @@ adminRouter.patch(
   validate({ body: adminCityUpdateSchema }),
   adminController.updateCity
 );
-adminRouter.get('/payouts', adminController.ledger);
+// NOTE: Payout ledger is served via GET /api/v1/payouts/admin/ledger (no entry limit).
+// The duplicate GET /admin/payouts has been removed to avoid confusion.

@@ -242,10 +242,22 @@ export class CheckoutService {
     return orders.map(formatOrder);
   }
 
+  public async getVendorOrder(userId: string, orderId: string): Promise<IOrder> {
+    const profile = await VendorProfile.findOne({ userId: new mongoose.Types.ObjectId(userId) });
+    if (!profile) throw new NotFoundError('Vendor profile not found');
+    const order = await Order.findById(orderId);
+    if (!order) throw new NotFoundError('Order not found');
+    if (!order.items.some((item) => item.vendorId.toString() === profile._id.toString())) {
+      throw new ForbiddenError('You cannot view this order');
+    }
+    return formatOrder(order);
+  }
+
   public async updateVendorOrderStatus(
     userId: string,
     orderId: string,
-    nextStatus: typeof ORDER_STATES.OUT_FOR_DELIVERY | typeof ORDER_STATES.ACTIVE
+    nextStatus: typeof ORDER_STATES.OUT_FOR_DELIVERY | typeof ORDER_STATES.ACTIVE,
+    deliveryPhoto?: { publicId: string; url: string }
   ): Promise<IOrder> {
     const profile = await VendorProfile.findOne({ userId: new mongoose.Types.ObjectId(userId) });
     if (!profile) throw new NotFoundError('Vendor profile not found');
@@ -268,6 +280,10 @@ export class CheckoutService {
         : 1;
       end.setMonth(end.getMonth() + tenureMonths);
       order.rentalEndAt = end;
+      // Store the optional proof-of-delivery photo.
+      if (deliveryPhoto) {
+        order.deliveryPhoto = deliveryPhoto;
+      }
     }
     await order.save();
     return formatOrder(order);
@@ -410,14 +426,21 @@ export class CheckoutService {
 
     if (input.decision === 'APPROVED') {
       const platformSettings = await PlatformSettings.findOne();
-      const commissionPercent =
+      const platformCommissionPercent =
         platformSettings?.platformCommissionPercent ?? env.PLATFORM_COMMISSION_PERCENT;
+
       const byVendor = new Map<string, number>();
       for (const item of order.items) {
         const key = item.vendorId.toString();
         byVendor.set(key, (byVendor.get(key) || 0) + item.monthlyRentPaise * item.quantity);
       }
       for (const [vendorId, grossRentPaise] of byVendor) {
+        // Use per-vendor commission if set, otherwise fall back to platform default.
+        const vendorProfile = await VendorProfile.findById(vendorId);
+        const commissionPercent =
+          typeof vendorProfile?.commissionPercent === 'number'
+            ? vendorProfile.commissionPercent
+            : platformCommissionPercent;
         const commissionPaise = Math.round((grossRentPaise * commissionPercent) / 100);
         await VendorLedger.findOneAndUpdate(
           { vendorId: new mongoose.Types.ObjectId(vendorId), orderId: order._id },

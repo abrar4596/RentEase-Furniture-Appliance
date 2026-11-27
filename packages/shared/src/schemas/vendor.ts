@@ -25,6 +25,8 @@ export type UpdateVendorProfileInput = z.infer<typeof updateVendorProfileSchema>
 export const adminVerifyVendorSchema = z.object({
   status: z.enum([VENDOR_STATUSES.APPROVED, VENDOR_STATUSES.REJECTED, VENDOR_STATUSES.SUSPENDED]),
   rejectionReason: z.string().max(500).optional(),
+  /** Override platform commission for this vendor (0–100). Omit to use platform default. */
+  commissionPercent: z.number().min(0).max(100).optional(),
 });
 
 export type AdminVerifyVendorInput = z.infer<typeof adminVerifyVendorSchema>;
@@ -41,4 +43,9 @@ export const updatePlatformSettingsSchema = z.object({
   platformCommissionPercent: z.number().min(0).max(100).optional(),
   kycWindowHours: z.number().int().min(1).max(168).optional(),
   reservationTtlMinutes: z.number().int().min(5).max(60).optional(),
+  deliverySlotCapacity: z.number().int().min(1).max(100).optional(),
+  blackoutDates: z
+    .array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD date format'))
+    .max(365)
+    .optional(),
 });
