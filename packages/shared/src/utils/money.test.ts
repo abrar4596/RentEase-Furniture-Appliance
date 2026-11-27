@@ -7,6 +7,7 @@ import {
   addMoney,
   subtractMoney,
   multiplyMoney,
+  calculateCommissionPaise,
   calculateUpfrontDue,
   formatINR,
 } from './money.js';
@@ -97,6 +98,19 @@ describe('Money Utilities (Zero-Float Integer Paise)', () => {
       expect(multiplyMoney(99900, 0.15)).toBe(14985);
       // Rounding: 1005 * 0.33333333 = 335
       expect(multiplyMoney(1005, 0.33333333)).toBe(335);
+    });
+
+    describe('calculateCommissionPaise', () => {
+      it('uses integer paise arithmetic for integer commission percentages', () => {
+        expect(calculateCommissionPaise(500000, 20)).toBe(100000);
+        expect(calculateCommissionPaise(100099, 15)).toBe(15014);
+      });
+
+      it('rejects invalid percentages', () => {
+        expect(() => calculateCommissionPaise(500000, -1)).toThrow(TypeError);
+        expect(() => calculateCommissionPaise(500000, 101)).toThrow(TypeError);
+        expect(() => calculateCommissionPaise(500000, 15.5)).toThrow(TypeError);
+      });
     });
 
     it('throws when factor is negative or invalid', () => {

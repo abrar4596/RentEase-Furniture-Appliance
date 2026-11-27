@@ -3,6 +3,7 @@ import {
   CreateVendorProfileInput,
   UpdateVendorProfileInput,
   AdminVerifyVendorInput,
+  AdminUpdateVendorCommissionInput,
   IVendorProfile,
   VENDOR_STATUSES,
   VendorStatus,
@@ -140,13 +141,19 @@ export class VendorService {
       profile.rejectionReason = undefined;
     }
 
-    // Per-vendor commission override — omit means "revert to platform default".
-    if (typeof input.commissionPercent === 'number') {
-      profile.commissionPercent = input.commissionPercent;
-    } else if (input.status === VENDOR_STATUSES.APPROVED) {
-      // On approval without an explicit rate, leave whatever was there (or undefined).
-    }
+    await profile.save();
+    const city = await City.findById(profile.cityId);
+    return formatVendorProfile(profile, city?.name);
+  }
 
+  public async adminUpdateCommission(
+    vendorId: string,
+    input: AdminUpdateVendorCommissionInput
+  ): Promise<IVendorProfile> {
+    if (!mongoose.isValidObjectId(vendorId)) throw new ValidationError('Invalid vendor ID');
+    const profile = await VendorProfile.findById(vendorId);
+    if (!profile) throw new NotFoundError('Vendor profile not found');
+    profile.commissionPercent = input.commissionPercent;
     await profile.save();
     const city = await City.findById(profile.cityId);
     return formatVendorProfile(profile, city?.name);

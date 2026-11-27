@@ -26,10 +26,11 @@ export interface IOrderDocument extends Document<mongoose.Types.ObjectId> {
     reviewedBy?: mongoose.Types.ObjectId;
     rejectionReason?: string;
   };
+  kycApprovedAt?: Date;
+  outForDeliveryAt?: Date;
+  deliveredAt?: Date;
   rentalStartAt?: Date;
   rentalEndAt?: Date;
-  /** Optional photo taken by vendor as proof of delivery (uploaded to Cloudinary). */
-  deliveryPhoto?: { publicId: string; url: string };
   maintenanceRequests: Array<{
     _id: mongoose.Types.ObjectId;
     description: string;
@@ -144,9 +145,11 @@ const orderSchema = new Schema<IOrderDocument>(
     razorpayPaymentId: String,
     razorpaySignature: String,
     kyc: kycSchema,
+    kycApprovedAt: Date,
+    outForDeliveryAt: Date,
+    deliveredAt: Date,
     rentalStartAt: Date,
     rentalEndAt: Date,
-    deliveryPhoto: { publicId: String, url: String },
     maintenanceRequests: {
       type: [
         {
@@ -206,11 +209,11 @@ export function formatOrder(doc: IOrderDocument): IOrder {
             rejectionReason: doc.kyc.rejectionReason,
           }
         : undefined,
+    kycApprovedAt: doc.kycApprovedAt?.toISOString(),
+    outForDeliveryAt: doc.outForDeliveryAt?.toISOString(),
+    deliveredAt: doc.deliveredAt?.toISOString(),
     rentalStartAt: doc.rentalStartAt?.toISOString(),
     rentalEndAt: doc.rentalEndAt?.toISOString(),
-    deliveryPhoto: doc.deliveryPhoto
-      ? { publicId: doc.deliveryPhoto.publicId, url: doc.deliveryPhoto.url }
-      : undefined,
     maintenanceRequests: (doc.maintenanceRequests || []).map((ticket) => ({
       id: ticket._id.toString(),
       description: ticket.description,

@@ -75,10 +75,11 @@ export interface IOrder {
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
   kyc?: OrderKyc;
+  kycApprovedAt?: string;
+  outForDeliveryAt?: string;
+  deliveredAt?: string;
   rentalStartAt?: string;
   rentalEndAt?: string;
-  /** Optional proof-of-delivery photo uploaded by the vendor. */
-  deliveryPhoto?: { publicId: string; url: string };
   maintenanceRequests: MaintenanceRequest[];
   returnRequest?: RentalReturn;
   damageClaim?: DamageClaim;

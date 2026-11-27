@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import { IVendorLedgerEntry, MarkVendorPayoutInput } from '@rentease/shared';
 import { VendorLedger, formatVendorLedger } from '../models/vendor-ledger.model.js';
 import { VendorProfile } from '../models/vendor.model.js';
-import { NotFoundError, ValidationError } from '../middleware/error-handler.js';
+import { ConflictError, NotFoundError, ValidationError } from '../middleware/error-handler.js';
 
 export class PayoutService {
   public async listAdminLedger(): Promise<IVendorLedgerEntry[]> {
@@ -42,14 +42,28 @@ export class PayoutService {
     if (entries.length !== entryIds.length) {
       throw new ValidationError('One or more payout entries are invalid or already paid');
     }
-    for (const entry of entries) {
-      entry.status = 'PAID';
-      entry.payoutReference = input.payoutReference;
-      entry.paidAt = new Date();
-      entry.paidBy = new mongoose.Types.ObjectId(adminUserId);
+    const paidAt = new Date();
+    const paidBy = new mongoose.Types.ObjectId(adminUserId);
+    const result = await VendorLedger.bulkWrite(
+      entries.map((entry) => ({
+        updateOne: {
+          filter: { _id: entry._id, vendorId, status: 'PENDING' },
+          update: {
+            $set: {
+              status: 'PAID',
+              payoutReference: input.payoutReference,
+              paidAt,
+              paidBy,
+            },
+          },
+        },
+      }))
+    );
+    if (result.modifiedCount !== entries.length) {
+      throw new ConflictError('Payout entries changed before they could be marked paid');
     }
-    await VendorLedger.bulkSave(entries);
-    return entries.map(formatVendorLedger);
+    const updated = await VendorLedger.find({ _id: { $in: entryIds }, vendorId, status: 'PAID' });
+    return updated.map(formatVendorLedger);
   }
 }
 

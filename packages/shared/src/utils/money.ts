@@ -91,6 +91,22 @@ export function multiplyMoney(amount: Paise, factor: number): Paise {
 }
 
 /**
+ * Calculates an integer-paise percentage commission using integer arithmetic.
+ * Percentages are integer percentages (for example, 15 means 15%).
+ */
+export function calculateCommissionPaise(amountPaise: Paise, commissionPercent: number): Paise {
+  assertValidPaise(amountPaise);
+  if (
+    !Number.isSafeInteger(commissionPercent) ||
+    commissionPercent < 0 ||
+    commissionPercent > 100
+  ) {
+    throw new TypeError('Commission percent must be an integer between 0 and 100');
+  }
+  return Math.floor((amountPaise * commissionPercent) / 100);
+}
+
+/**
  * Calculates total upfront payment due at checkout:
  * Upfront = First Month Rent + Security Deposit
  * Validates that ₹0 security deposit is supported and valid.

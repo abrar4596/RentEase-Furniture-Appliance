@@ -20,14 +20,12 @@ import {
   NotFoundError,
   ForbiddenError,
 } from '../middleware/error-handler.js';
+import { calculateCommissionPaise } from '@rentease/shared';
 import { VendorLedger } from '../models/vendor-ledger.model.js';
 import { PlatformSettings } from '../models/platform-settings.model.js';
-import { AuditEvent } from '../models/audit.model.js';
-import { User } from '../models/user.model.js';
 import { deliverySlotService } from './delivery-slot.service.js';
 import { paymentGateway } from '../adapters/payment-gateway.adapter.js';
 import { paymentService } from './payment.service.js';
-import { emailService } from './email.service.js';
 
 export class CheckoutService {
   public async createCheckout(
@@ -242,22 +240,10 @@ export class CheckoutService {
     return orders.map(formatOrder);
   }
 
-  public async getVendorOrder(userId: string, orderId: string): Promise<IOrder> {
-    const profile = await VendorProfile.findOne({ userId: new mongoose.Types.ObjectId(userId) });
-    if (!profile) throw new NotFoundError('Vendor profile not found');
-    const order = await Order.findById(orderId);
-    if (!order) throw new NotFoundError('Order not found');
-    if (!order.items.some((item) => item.vendorId.toString() === profile._id.toString())) {
-      throw new ForbiddenError('You cannot view this order');
-    }
-    return formatOrder(order);
-  }
-
   public async updateVendorOrderStatus(
     userId: string,
     orderId: string,
-    nextStatus: typeof ORDER_STATES.OUT_FOR_DELIVERY | typeof ORDER_STATES.ACTIVE,
-    deliveryPhoto?: { publicId: string; url: string }
+    nextStatus: typeof ORDER_STATES.OUT_FOR_DELIVERY | typeof ORDER_STATES.ACTIVE
   ): Promise<IOrder> {
     const profile = await VendorProfile.findOne({ userId: new mongoose.Types.ObjectId(userId) });
     if (!profile) throw new NotFoundError('Vendor profile not found');
@@ -273,6 +259,7 @@ export class CheckoutService {
     order.status = nextStatus;
     if (nextStatus === ORDER_STATES.ACTIVE) {
       const start = new Date();
+      order.deliveredAt = start;
       order.rentalStartAt = start;
       const end = new Date(start);
       const tenureMonths = order.items.length
@@ -280,10 +267,9 @@ export class CheckoutService {
         : 1;
       end.setMonth(end.getMonth() + tenureMonths);
       order.rentalEndAt = end;
-      // Store the optional proof-of-delivery photo.
-      if (deliveryPhoto) {
-        order.deliveryPhoto = deliveryPhoto;
-      }
+    }
+    if (nextStatus === ORDER_STATES.OUT_FOR_DELIVERY) {
+      order.outForDeliveryAt = new Date();
     }
     await order.save();
     return formatOrder(order);
@@ -367,8 +353,6 @@ export class CheckoutService {
       throw new ValidationError('KYC can only be submitted for a pending or rejected order');
     }
 
-    const isResubmission = order.status === ORDER_STATES.KYC_REJECTED;
-
     order.kyc = {
       documentType: input.documentType,
       documentNumber: input.documentNumber,
@@ -376,21 +360,11 @@ export class CheckoutService {
       backDocument: input.backDocument,
       submittedAt: new Date(),
     };
-    if (isResubmission) {
+    if (order.status === ORDER_STATES.KYC_REJECTED) {
       assertValidOrderTransition(order.status, ORDER_STATES.PENDING_KYC);
       order.status = ORDER_STATES.PENDING_KYC;
     }
     await order.save();
-
-    // Audit: record every KYC submission (initial or resubmission).
-    await AuditEvent.create({
-      actorId: new mongoose.Types.ObjectId(userId),
-      action: isResubmission ? 'KYC_RESUBMITTED' : 'KYC_SUBMITTED',
-      entityType: 'kyc',
-      entityId: orderId,
-      metadata: { documentType: input.documentType },
-    });
-
     return formatOrder(order);
   }
 
@@ -422,32 +396,33 @@ export class CheckoutService {
     );
     order.status =
       input.decision === 'APPROVED' ? ORDER_STATES.CONFIRMED : ORDER_STATES.KYC_REJECTED;
+    if (input.decision === 'APPROVED') {
+      order.kycApprovedAt = new Date();
+    }
     await order.save();
-
     if (input.decision === 'APPROVED') {
       const platformSettings = await PlatformSettings.findOne();
-      const platformCommissionPercent =
+      const commissionPercent =
         platformSettings?.platformCommissionPercent ?? env.PLATFORM_COMMISSION_PERCENT;
-
       const byVendor = new Map<string, number>();
       for (const item of order.items) {
         const key = item.vendorId.toString();
         byVendor.set(key, (byVendor.get(key) || 0) + item.monthlyRentPaise * item.quantity);
       }
       for (const [vendorId, grossRentPaise] of byVendor) {
-        // Use per-vendor commission if set, otherwise fall back to platform default.
-        const vendorProfile = await VendorProfile.findById(vendorId);
-        const commissionPercent =
-          typeof vendorProfile?.commissionPercent === 'number'
-            ? vendorProfile.commissionPercent
-            : platformCommissionPercent;
-        const commissionPaise = Math.round((grossRentPaise * commissionPercent) / 100);
+        const vendor = await VendorProfile.findById(vendorId);
+        const effectiveCommissionPercent =
+          vendor?.commissionPercent ?? commissionPercent;
+        const commissionPaise = calculateCommissionPaise(
+          grossRentPaise,
+          effectiveCommissionPercent
+        );
         await VendorLedger.findOneAndUpdate(
           { vendorId: new mongoose.Types.ObjectId(vendorId), orderId: order._id },
           {
             $setOnInsert: {
               grossRentPaise,
-              commissionPercent,
+              commissionPercent: effectiveCommissionPercent,
               commissionPaise,
               netPayablePaise: grossRentPaise - commissionPaise,
               status: 'PENDING',
@@ -457,40 +432,6 @@ export class CheckoutService {
         );
       }
     }
-
-    // Audit log every KYC review decision (mandated by Phase 6 — every view/decision).
-    await AuditEvent.create({
-      actorId: new mongoose.Types.ObjectId(adminUserId),
-      action: input.decision === 'APPROVED' ? 'KYC_APPROVED' : 'KYC_REJECTED',
-      entityType: 'kyc',
-      entityId: orderId,
-      reason: input.rejectionReason,
-      metadata: { decision: input.decision },
-    });
-
-    // Fire-and-forget email notifications (non-critical — do not throw on failure).
-    const renter = await User.findById(order.renterId).catch(() => null);
-    if (renter?.email) {
-      if (input.decision === 'APPROVED') {
-        emailService
-          .sendKycApprovedEmail(renter.email, { id: orderId })
-          .catch((err: unknown) => {
-            const message = err instanceof Error ? err.message : String(err);
-            void message; // logged below
-          });
-      } else {
-        emailService
-          .sendKycRejectedEmail(renter.email, {
-            id: orderId,
-            rejectionReason: input.rejectionReason ?? 'Documents could not be verified',
-          })
-          .catch((err: unknown) => {
-            const message = err instanceof Error ? err.message : String(err);
-            void message;
-          });
-      }
-    }
-
     return formatOrder(order);
   }
 

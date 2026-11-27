@@ -9,9 +9,8 @@ export interface IVendorProfileDocument extends Document<mongoose.Types.ObjectId
   cityId: mongoose.Types.ObjectId;
   servicePincodes: string[];
   verificationStatus: VendorStatus;
-  rejectionReason?: string;
-  /** Optional per-vendor commission override (0–100). Falls back to platform default. */
   commissionPercent?: number;
+  rejectionReason?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -52,15 +51,10 @@ const vendorProfileSchema = new Schema<IVendorProfileDocument>(
       default: VENDOR_STATUSES.PENDING,
       index: true,
     },
+    commissionPercent: { type: Number, min: 0, max: 100 },
     rejectionReason: {
       type: String,
       trim: true,
-    },
-    commissionPercent: {
-      type: Number,
-      min: 0,
-      max: 100,
-      // Intentionally no `required` or `default` — absence means "use platform default".
     },
   },
   {
@@ -81,8 +75,8 @@ export function formatVendorProfile(
     cityName,
     servicePincodes: doc.servicePincodes,
     verificationStatus: doc.verificationStatus,
-    rejectionReason: doc.rejectionReason,
     commissionPercent: doc.commissionPercent,
+    rejectionReason: doc.rejectionReason,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };

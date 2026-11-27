@@ -3,6 +3,7 @@ import {
   createVendorProfileSchema,
   updateVendorProfileSchema,
   adminVerifyVendorSchema,
+  adminUpdateVendorCommissionSchema,
   USER_ROLES,
 } from '@rentease/shared';
 import { vendorController } from '../controllers/vendor.controller.js';
@@ -44,4 +45,12 @@ vendorRouter.patch(
   authorize(USER_ROLES.ADMIN),
   validate({ body: adminVerifyVendorSchema }),
   vendorController.adminVerifyVendor
+);
+
+vendorRouter.patch(
+  '/admin/:id/commission',
+  authenticate,
+  authorize(USER_ROLES.ADMIN),
+  validate({ body: adminUpdateVendorCommissionSchema }),
+  vendorController.adminUpdateCommission
 );

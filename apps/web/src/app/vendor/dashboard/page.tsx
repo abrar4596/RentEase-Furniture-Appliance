@@ -86,6 +86,24 @@ function VendorDashboardContent() {
   const [isLoadingFulfillment, setIsLoadingFulfillment] = useState(false);
   const [ledgerEntries, setLedgerEntries] = useState<IVendorLedgerEntry[]>([]);
   const [pendingPayoutPaise, setPendingPayoutPaise] = useState(0);
+  const [slaNow, setSlaNow] = useState(0);
+
+  useEffect(() => {
+    setSlaNow(Date.now());
+  }, []);
+
+  const getDeliverySla = (order: IOrder): { label: string; breached: boolean } => {
+    if (!order.kycApprovedAt) return { label: 'Awaiting KYC approval', breached: false };
+    const start = new Date(order.kycApprovedAt).getTime();
+    const end = order.deliveredAt
+      ? new Date(order.deliveredAt).getTime()
+      : slaNow || start;
+    const elapsedHours = Math.max(0, Math.floor((end - start) / (60 * 60 * 1000)));
+    if (elapsedHours <= 48) {
+      return { label: `${elapsedHours}h / 48h`, breached: false };
+    }
+    return { label: `${elapsedHours}h / breached`, breached: true };
+  };
 
   // Fetch Cities
   const fetchCities = useCallback(async () => {
@@ -118,8 +136,8 @@ function VendorDashboardContent() {
         setVendorProfile(null);
       } else if (res.ok) {
         const data = await res.json();
-        if (data.success && data.data?.vendor) {
-          setVendorProfile(data.data.vendor);
+        if (data.success) {
+          setVendorProfile(data.data?.profile ?? null);
         }
       }
     } catch (err: unknown) {
@@ -286,7 +304,7 @@ function VendorDashboardContent() {
           'Store Registered',
           'Vendor profile created successfully. Awaiting admin verification.'
         );
-        setVendorProfile(data.data.vendor);
+        setVendorProfile(data.data.profile);
       } else {
         toastError('Failed to Create Profile', data.error?.message || 'Please check your input.');
       }
@@ -655,6 +673,7 @@ function VendorDashboardContent() {
                     <th className="px-4 py-3">Order</th>
                     <th className="px-4 py-3">Customer</th>
                     <th className="px-4 py-3">Delivery</th>
+                    <th className="px-4 py-3">48h SLA</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3 text-right">Action</th>
                   </tr>
@@ -677,6 +696,22 @@ function VendorDashboardContent() {
                         <p className="text-xs capitalize text-gray-500">
                           {order.preferredDeliverySlot}
                         </p>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        {(() => {
+                          const sla = getDeliverySla(order);
+                          return (
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                sla.breached
+                                  ? 'bg-rose-100 text-rose-800'
+                                  : 'bg-emerald-100 text-emerald-800'
+                              }`}
+                            >
+                              {sla.label}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className="px-4 py-3.5">
                         <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">

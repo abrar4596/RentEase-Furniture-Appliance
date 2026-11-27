@@ -25,11 +25,17 @@ export type UpdateVendorProfileInput = z.infer<typeof updateVendorProfileSchema>
 export const adminVerifyVendorSchema = z.object({
   status: z.enum([VENDOR_STATUSES.APPROVED, VENDOR_STATUSES.REJECTED, VENDOR_STATUSES.SUSPENDED]),
   rejectionReason: z.string().max(500).optional(),
-  /** Override platform commission for this vendor (0–100). Omit to use platform default. */
-  commissionPercent: z.number().min(0).max(100).optional(),
 });
 
 export type AdminVerifyVendorInput = z.infer<typeof adminVerifyVendorSchema>;
+
+export const adminUpdateVendorCommissionSchema = z.object({
+  commissionPercent: z.number().int().min(0).max(100),
+});
+
+export type AdminUpdateVendorCommissionInput = z.infer<
+  typeof adminUpdateVendorCommissionSchema
+>;
 
 export const markVendorPayoutSchema = z.object({
   vendorId: z.string().min(1),

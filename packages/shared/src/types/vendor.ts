@@ -17,13 +17,8 @@ export interface IVendorProfile {
   cityName?: string;
   servicePincodes: string[];
   verificationStatus: VendorStatus;
-  rejectionReason?: string;
-  /**
-   * Optional per-vendor commission override (0–100).
-   * When absent the platform-wide `PlatformSettings.platformCommissionPercent`
-   * is used instead.
-   */
   commissionPercent?: number;
+  rejectionReason?: string;
   createdAt: string;
   updatedAt: string;
 }
