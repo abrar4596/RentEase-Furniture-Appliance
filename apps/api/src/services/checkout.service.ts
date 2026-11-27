@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import mongoose from 'mongoose';
 import {
   DeliveryAddress,
@@ -14,7 +13,7 @@ import { Cart } from '../models/cart.model.js';
 import { Product } from '../models/product.model.js';
 import { VendorProfile } from '../models/vendor.model.js';
 import { Order, formatOrder } from '../models/order.model.js';
-import { InventoryLock } from '../models/inventory-lock.model.js';
+import { InventoryLock, IInventoryLockDocument } from '../models/inventory-lock.model.js';
 import {
   ConflictError,
   ValidationError,
@@ -23,35 +22,12 @@ import {
 } from '../middleware/error-handler.js';
 import { VendorLedger } from '../models/vendor-ledger.model.js';
 import { PlatformSettings } from '../models/platform-settings.model.js';
-
-async function createRazorpayOrder(amountPaise: number, receipt: string): Promise<string> {
-  const canCallApi =
-    env.RAZORPAY_KEY_ID.startsWith('rzp_') &&
-    !env.RAZORPAY_KEY_ID.includes('placeholder') &&
-    !env.RAZORPAY_KEY_SECRET.includes('placeholder');
-  if (!canCallApi) return `rzp_test_order_${crypto.randomBytes(8).toString('hex')}`;
-
-  const response = await fetch('https://api.razorpay.com/v1/orders', {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`).toString('base64')}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ amount: amountPaise, currency: 'INR', receipt }),
-  });
-  if (!response.ok) throw new Error('Razorpay order creation failed');
-  const data = (await response.json()) as { id: string };
-  return data.id;
-}
-
-function timingSafeEqual(actual: string, expected: string): boolean {
-  const actualBuffer = Buffer.from(actual);
-  const expectedBuffer = Buffer.from(expected);
-  return (
-    actualBuffer.length === expectedBuffer.length &&
-    crypto.timingSafeEqual(actualBuffer, expectedBuffer)
-  );
-}
+import { AuditEvent } from '../models/audit.model.js';
+import { User } from '../models/user.model.js';
+import { deliverySlotService } from './delivery-slot.service.js';
+import { paymentGateway } from '../adapters/payment-gateway.adapter.js';
+import { paymentService } from './payment.service.js';
+import { emailService } from './email.service.js';
 
 export class CheckoutService {
   public async createCheckout(
@@ -67,12 +43,14 @@ export class CheckoutService {
     const cart = await Cart.findOne({ userId: new mongoose.Types.ObjectId(userId) });
     if (!cart || cart.items.length === 0) throw new ValidationError('Your cart is empty');
 
-    const date = new Date(`${input.preferredDeliveryDate}T00:00:00`);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (Number.isNaN(date.getTime()) || date < today) {
-      throw new ValidationError('Preferred delivery date must be today or in the future');
-    }
+    // Validate serviceability, lead time, capacity and blackout dates in one place
+    // so the server never accepts a slot the delivery picker would reject.
+    await deliverySlotService.assertSlotBookable(
+      cart,
+      input.deliveryAddress.pincode,
+      input.preferredDeliveryDate,
+      input.preferredDeliverySlot
+    );
 
     const orderItems: Array<{
       productId: mongoose.Types.ObjectId;
@@ -144,7 +122,7 @@ export class CheckoutService {
         totalUpfrontPaise,
         status: ORDER_STATES.PENDING_PAYMENT,
       });
-      const razorpayOrderId = await createRazorpayOrder(
+      const razorpayOrderId = await paymentGateway.createOrder(
         totalUpfrontPaise,
         `rentease_${provisional._id}`
       );
@@ -160,7 +138,7 @@ export class CheckoutService {
         }))
       );
       await Cart.findByIdAndUpdate(cart._id, { $set: { items: [] } });
-      return { order: formatOrder(provisional), keyId: env.RAZORPAY_KEY_ID };
+      return { order: formatOrder(provisional), keyId: paymentGateway.keyId };
     } catch (error) {
       for (const lock of lockedProducts) {
         await Product.findByIdAndUpdate(lock.productId, { $inc: { stockCount: lock.quantity } });
@@ -185,25 +163,58 @@ export class CheckoutService {
     if (order.razorpayOrderId !== input.razorpay_order_id)
       throw new ValidationError('Razorpay order mismatch');
 
-    const payload = `${input.razorpay_order_id}|${input.razorpay_payment_id}`;
-    const expected = crypto
-      .createHmac('sha256', env.RAZORPAY_KEY_SECRET)
-      .update(payload)
-      .digest('hex');
-    if (!timingSafeEqual(input.razorpay_signature, expected)) {
+    const isValidSignature = paymentGateway.verifyPaymentSignature({
+      razorpayOrderId: input.razorpay_order_id,
+      razorpayPaymentId: input.razorpay_payment_id,
+      signature: input.razorpay_signature,
+    });
+    if (!isValidSignature) {
       throw new ValidationError('Invalid Razorpay payment signature');
     }
 
-    assertValidOrderTransition(order.status, ORDER_STATES.PENDING_KYC);
-    order.status = ORDER_STATES.PENDING_KYC;
-    order.razorpayPaymentId = input.razorpay_payment_id;
-    order.razorpaySignature = input.razorpay_signature;
-    await order.save();
-    await InventoryLock.updateMany(
-      { orderId: order._id, released: false },
-      { $set: { released: false, expiresAt: new Date('2099-01-01') } }
-    );
-    return formatOrder(order);
+    // Settlement (state change + firm allocation + ledger + confirmation email)
+    // is shared with the webhook path and is exactly-once.
+    const { order: settled } = await paymentService.settleCapturedOrder(order, {
+      razorpayPaymentId: input.razorpay_payment_id,
+      razorpaySignature: input.razorpay_signature,
+    });
+    return formatOrder(settled);
+  }
+
+  /**
+   * Re-opens payment for an order that is still awaiting payment (e.g. the renter
+   * dismissed the Razorpay modal). Reuses the existing gateway order so stock is
+   * never double-locked, and refuses once the reservation has lapsed so a renter
+   * can never pay for stock the sweeper may already have reclaimed.
+   */
+  public async resumePayment(
+    userId: string,
+    orderId: string
+  ): Promise<{ order: IOrder; keyId: string }> {
+    const order = await Order.findById(orderId);
+    if (!order) throw new NotFoundError('Order not found');
+    if (order.renterId.toString() !== userId)
+      throw new ForbiddenError('You cannot pay for this order');
+    if (order.status !== ORDER_STATES.PENDING_PAYMENT)
+      throw new ValidationError('This order is not awaiting payment');
+
+    const hasLiveReservation = await InventoryLock.exists({
+      orderId: order._id,
+      released: false,
+      expiresAt: { $gt: new Date() },
+    });
+    if (!hasLiveReservation) {
+      throw new ConflictError('Your payment window has expired. Please start a new checkout.');
+    }
+
+    if (!order.razorpayOrderId) {
+      order.razorpayOrderId = await paymentGateway.createOrder(
+        order.totalUpfrontPaise,
+        `rentease_${order._id}`
+      );
+      await order.save();
+    }
+    return { order: formatOrder(order), keyId: paymentGateway.keyId };
   }
 
   public async getOrders(userId: string): Promise<IOrder[]> {
@@ -279,41 +290,47 @@ export class CheckoutService {
     order.status = ORDER_STATES.CANCELLED;
     await order.save();
 
-    const locks = await InventoryLock.find({ orderId: order._id, released: false });
-    for (const lock of locks) {
-      await Product.findByIdAndUpdate(lock.productId, { $inc: { stockCount: lock.quantity } });
-      lock.released = true;
-      await lock.save();
-    }
+    await this.releaseOrderLocks(order._id.toString());
     return formatOrder(order);
   }
 
+  /** Returns the stock of an order's open reservations and finalises the rows. */
   public async releaseOrderLocks(orderId: string): Promise<void> {
     const order = await Order.findById(orderId);
     if (!order) return;
     const locks = await InventoryLock.find({ orderId: order._id, released: false });
-    for (const lock of locks) {
-      await Product.findByIdAndUpdate(lock.productId, { $inc: { stockCount: lock.quantity } });
-      lock.released = true;
-      await lock.save();
-    }
+    for (const lock of locks) await this.releaseLock(lock);
   }
 
+  /**
+   * Background reconciliation: returns stock for reservations that lapsed without
+   * payment. Committed allocations are deliberately skipped — their stock is only
+   * returned on cancel/refund. Idempotent: `released` guards double-returning.
+   */
   public async reconcileExpiredLocks(): Promise<number> {
     const expiredLocks = await InventoryLock.find({
       released: false,
+      committed: false,
       expiresAt: { $lt: new Date() },
     });
     let reconciled = 0;
     for (const lock of expiredLocks) {
       const order = await Order.findById(lock.orderId);
       if (!order || order.status !== ORDER_STATES.PENDING_PAYMENT) continue;
-      await Product.findByIdAndUpdate(lock.productId, { $inc: { stockCount: lock.quantity } });
-      lock.released = true;
-      await lock.save();
+      await this.releaseLock(lock);
       reconciled += lock.quantity;
     }
     return reconciled;
+  }
+
+  /** Returns a lock's stock to the product and marks it finalised for TTL cleanup. */
+  private async releaseLock(lock: IInventoryLockDocument): Promise<void> {
+    await Product.findByIdAndUpdate(lock.productId, { $inc: { stockCount: lock.quantity } });
+    const now = new Date();
+    lock.released = true;
+    lock.releasedAt = now;
+    lock.purgeAt = now;
+    await lock.save();
   }
 
   public async submitKyc(
@@ -334,6 +351,8 @@ export class CheckoutService {
       throw new ValidationError('KYC can only be submitted for a pending or rejected order');
     }
 
+    const isResubmission = order.status === ORDER_STATES.KYC_REJECTED;
+
     order.kyc = {
       documentType: input.documentType,
       documentNumber: input.documentNumber,
@@ -341,11 +360,21 @@ export class CheckoutService {
       backDocument: input.backDocument,
       submittedAt: new Date(),
     };
-    if (order.status === ORDER_STATES.KYC_REJECTED) {
+    if (isResubmission) {
       assertValidOrderTransition(order.status, ORDER_STATES.PENDING_KYC);
       order.status = ORDER_STATES.PENDING_KYC;
     }
     await order.save();
+
+    // Audit: record every KYC submission (initial or resubmission).
+    await AuditEvent.create({
+      actorId: new mongoose.Types.ObjectId(userId),
+      action: isResubmission ? 'KYC_RESUBMITTED' : 'KYC_SUBMITTED',
+      entityType: 'kyc',
+      entityId: orderId,
+      metadata: { documentType: input.documentType },
+    });
+
     return formatOrder(order);
   }
 
@@ -378,6 +407,7 @@ export class CheckoutService {
     order.status =
       input.decision === 'APPROVED' ? ORDER_STATES.CONFIRMED : ORDER_STATES.KYC_REJECTED;
     await order.save();
+
     if (input.decision === 'APPROVED') {
       const platformSettings = await PlatformSettings.findOne();
       const commissionPercent =
@@ -404,6 +434,40 @@ export class CheckoutService {
         );
       }
     }
+
+    // Audit log every KYC review decision (mandated by Phase 6 — every view/decision).
+    await AuditEvent.create({
+      actorId: new mongoose.Types.ObjectId(adminUserId),
+      action: input.decision === 'APPROVED' ? 'KYC_APPROVED' : 'KYC_REJECTED',
+      entityType: 'kyc',
+      entityId: orderId,
+      reason: input.rejectionReason,
+      metadata: { decision: input.decision },
+    });
+
+    // Fire-and-forget email notifications (non-critical — do not throw on failure).
+    const renter = await User.findById(order.renterId).catch(() => null);
+    if (renter?.email) {
+      if (input.decision === 'APPROVED') {
+        emailService
+          .sendKycApprovedEmail(renter.email, { id: orderId })
+          .catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : String(err);
+            void message; // logged below
+          });
+      } else {
+        emailService
+          .sendKycRejectedEmail(renter.email, {
+            id: orderId,
+            rejectionReason: input.rejectionReason ?? 'Documents could not be verified',
+          })
+          .catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : String(err);
+            void message;
+          });
+      }
+    }
+
     return formatOrder(order);
   }
 

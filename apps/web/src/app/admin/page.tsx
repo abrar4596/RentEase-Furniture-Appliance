@@ -150,6 +150,29 @@ function AdminConsole() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
       <h1 className="mb-6 text-2xl font-bold">Operations Console</h1>
+
+      {/* Quick navigation */}
+      <div className="mb-6 flex flex-wrap gap-3">
+        <a
+          href="/admin/kyc"
+          className="inline-flex items-center rounded-lg border border-emerald-600 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
+        >
+          KYC Review Queue
+        </a>
+        <a
+          href="/admin/vendors"
+          className="inline-flex items-center rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Vendor Management
+        </a>
+        <a
+          href="/admin/payouts"
+          className="inline-flex items-center rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Payouts
+        </a>
+      </div>
+
       {metrics && (
         <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
           {[

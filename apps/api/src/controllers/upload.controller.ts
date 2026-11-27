@@ -26,6 +26,38 @@ export class UploadController {
       next(error);
     }
   }
+
+  /**
+   * Returns a short-lived authenticated Cloudinary URL for a single KYC document.
+   * Only admins may call this endpoint. The `publicId` is submitted by the renter
+   * when they upload their KYC; the admin supplies it back via query param.
+   * This keeps KYC assets in Cloudinary authenticated delivery — never public.
+   */
+  public async getKycViewUrl(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.user) throw new UnauthorizedError('Authentication required');
+      if (req.user.role !== 'admin') {
+        throw new ForbiddenError('Only admins may request KYC view URLs');
+      }
+
+      const publicId = req.query.publicId;
+      if (typeof publicId !== 'string' || publicId.trim().length === 0) {
+        throw new ValidationError('publicId query parameter is required');
+      }
+
+      // Restrict to the KYC folder prefix so this endpoint cannot be used to
+      // generate signed URLs for arbitrary Cloudinary assets.
+      const normalised = publicId.trim();
+      if (!normalised.startsWith('rentease/kyc/')) {
+        throw new ValidationError('publicId must be within the rentease/kyc/ folder');
+      }
+
+      const url = uploadService.generateKycViewUrl(normalised);
+      res.json({ success: true, data: { url } });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const uploadController = new UploadController();

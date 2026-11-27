@@ -1,12 +1,14 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useAuth } from '../../context/AuthContext';
 import { ProtectedRoute } from '../../components/auth/ProtectedRoute';
 import { Card, CardContent, Skeleton, Button, Modal, Input } from '../../components/ui';
 import { IOrder, ProductImage, formatINR } from '@rentease/shared';
 import { ImageUploader } from '../../components/vendor/ImageUploader';
 import { useToast } from '../../components/ui/Toast';
+import { PaymentDismissedError, loadRazorpay, openRazorpayCheckout } from '../../lib/razorpay';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
 
@@ -23,13 +25,6 @@ function OrdersContent() {
   const { success, error: toastError } = useToast();
   const [orders, setOrders] = useState<IOrder[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedOrder, setSelectedOrder] = useState<IOrder | null>(null);
-  const [documentType, setDocumentType] = useState<
-    'AADHAR' | 'PAN' | 'DL' | 'PASSPORT' | 'VOTER_ID'
-  >('AADHAR');
-  const [documentNumber, setDocumentNumber] = useState('');
-  const [front, setFront] = useState<ProductImage[]>([]);
-  const [back, setBack] = useState<ProductImage[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [actionOrder, setActionOrder] = useState<IOrder | null>(null);
   const [actionType, setActionType] = useState<'maintenance' | 'extend' | 'return' | null>(null);
@@ -38,6 +33,8 @@ function OrdersContent() {
   const [additionalMonths, setAdditionalMonths] = useState(1);
   const [pickupDate, setPickupDate] = useState('');
   const [returnReason, setReturnReason] = useState('');
+  const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -48,44 +45,6 @@ function OrdersContent() {
       })
       .finally(() => setLoading(false));
   }, [accessToken]);
-
-  const submitKyc = async () => {
-    if (!selectedOrder || !accessToken || !front[0]) {
-      toastError('KYC incomplete', 'Add a front document image and document number');
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const res = await fetch(`${API_BASE}/orders/${selectedOrder.id}/kyc`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({
-          documentType,
-          documentNumber,
-          frontDocument: { publicId: front[0].publicId, url: front[0].url },
-          backDocument: back[0] ? { publicId: back[0].publicId, url: back[0].url } : undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error?.message || 'Failed to submit KYC');
-      setOrders((current) =>
-        current.map((order) => (order.id === selectedOrder.id ? data.data.order : order))
-      );
-      setSelectedOrder(null);
-      setDocumentNumber('');
-      setFront([]);
-      setBack([]);
-      success('KYC submitted', 'Your documents are pending admin review');
-    } catch (error) {
-      toastError(
-        'Submission failed',
-        error instanceof Error ? error.message : 'Could not submit KYC'
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const submitLifecycleAction = async () => {
     if (!actionOrder || !accessToken || !actionType) return;
     setSubmitting(true);
@@ -142,6 +101,100 @@ function OrdersContent() {
     }
   };
 
+  const payForOrder = async (order: IOrder) => {
+    if (!accessToken) return;
+    setPayingOrderId(order.id);
+    let paymentCaptured = false;
+    try {
+      // Re-open payment with the server's existing gateway order (never double-locks
+      // stock) and refuse silently once the reservation has lapsed.
+      const res = await fetch(`${API_BASE}/orders/${order.id}/pay`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error?.message || 'Could not start payment');
+      }
+      const resumed = data.data.order as IOrder;
+      const keyId = data.data.keyId as string;
+      if (!resumed.razorpayOrderId) throw new Error('Payment could not be initialised');
+
+      await loadRazorpay();
+      const payment = await openRazorpayCheckout({
+        key: keyId,
+        amount: resumed.totalUpfrontPaise,
+        currency: 'INR',
+        name: 'RentEase',
+        description: `Rental order #${resumed.id.slice(-8)}`,
+        order_id: resumed.razorpayOrderId,
+        prefill: {
+          name: resumed.deliveryAddress.fullName,
+          contact: resumed.deliveryAddress.phone,
+        },
+        theme: { color: '#10b981' },
+      });
+      paymentCaptured = true;
+
+      const verifyRes = await fetch(`${API_BASE}/orders/${order.id}/verify-payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          razorpay_order_id: payment.razorpay_order_id,
+          razorpay_payment_id: payment.razorpay_payment_id,
+          razorpay_signature: payment.razorpay_signature,
+        }),
+      });
+      const verifyData = await verifyRes.json();
+      if (!verifyRes.ok || !verifyData.success) {
+        throw new Error(verifyData.error?.message || 'Payment confirmation failed');
+      }
+      setOrders((current) =>
+        current.map((entry) => (entry.id === order.id ? (verifyData.data.order as IOrder) : entry))
+      );
+      success('Payment successful', 'Complete your KYC to confirm the delivery');
+    } catch (error) {
+      if (error instanceof PaymentDismissedError) {
+        toastError('Payment cancelled', 'You can retry any time before the reservation expires.');
+      } else if (paymentCaptured) {
+        toastError(
+          'Confirming payment',
+          'Your payment went through but confirmation is still pending. Refresh in a moment.'
+        );
+      } else {
+        toastError(
+          error instanceof Error ? error.message : 'Could not complete payment',
+          'Payment'
+        );
+      }
+    } finally {
+      setPayingOrderId(null);
+    }
+  };
+
+  const cancelOrder = async (order: IOrder) => {
+    if (!accessToken) return;
+    setCancellingOrderId(order.id);
+    try {
+      const res = await fetch(`${API_BASE}/orders/${order.id}/cancel`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error?.message || 'Could not cancel the order');
+      }
+      setOrders((current) =>
+        current.map((entry) => (entry.id === order.id ? (data.data.order as IOrder) : entry))
+      );
+      success('Order cancelled', 'Your reserved items have been released');
+    } catch (error) {
+      toastError(error instanceof Error ? error.message : 'Could not cancel the order', 'Orders');
+    } finally {
+      setCancellingOrderId(null);
+    }
+  };
+
   if (loading)
     return (
       <div className="mx-auto max-w-5xl px-4 py-8">
@@ -173,6 +226,32 @@ function OrdersContent() {
                     Payment reference: {order.razorpayOrderId}
                   </p>
                 )}
+                {order.status === 'PENDING_PAYMENT' && (
+                  <div className="mt-4 space-y-2">
+                    <p className="text-sm text-amber-700">
+                      Payment pending — your items are reserved until you complete payment.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        isLoading={payingOrderId === order.id}
+                        disabled={cancellingOrderId === order.id}
+                        onClick={() => payForOrder(order)}
+                      >
+                        Complete payment
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        isLoading={cancellingOrderId === order.id}
+                        disabled={payingOrderId === order.id}
+                        onClick={() => cancelOrder(order)}
+                      >
+                        Cancel order
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 {(order.status === 'PENDING_KYC' || order.status === 'KYC_REJECTED') && (
                   <div className="mt-4">
                     {order.status === 'KYC_REJECTED' && (
@@ -185,9 +264,11 @@ function OrdersContent() {
                         KYC documents submitted and pending review
                       </p>
                     ) : (
-                      <Button size="sm" onClick={() => setSelectedOrder(order)}>
-                        {order.status === 'KYC_REJECTED' ? 'Resubmit KYC' : 'Complete KYC'}
-                      </Button>
+                      <Link href={`/kyc/${order.id}`}>
+                        <Button size="sm">
+                          {order.status === 'KYC_REJECTED' ? 'Resubmit KYC' : 'Complete KYC'}
+                        </Button>
+                      </Link>
                     )}
                   </div>
                 )}
@@ -238,48 +319,6 @@ function OrdersContent() {
             </Card>
           ))}
         </div>
-      )}
-
-      {selectedOrder && (
-        <Modal isOpen onClose={() => setSelectedOrder(null)} title="Complete rental KYC">
-          <div className="space-y-4">
-            <div>
-              <label className="mb-1 block text-sm font-medium">Document type</label>
-              <select
-                value={documentType}
-                onChange={(e) => setDocumentType(e.target.value as typeof documentType)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              >
-                <option value="AADHAR">Aadhar</option>
-                <option value="PAN">PAN</option>
-                <option value="DL">Driving Licence</option>
-                <option value="PASSPORT">Passport</option>
-                <option value="VOTER_ID">Voter ID</option>
-              </select>
-            </div>
-            <Input
-              label="Document number"
-              value={documentNumber}
-              onChange={(e) => setDocumentNumber(e.target.value)}
-            />
-            <div>
-              <p className="mb-2 text-sm font-medium">Front document</p>
-              <ImageUploader images={front} onChange={setFront} maxImages={1} uploadFolder="kyc" />
-            </div>
-            <div>
-              <p className="mb-2 text-sm font-medium">Back document (optional)</p>
-              <ImageUploader images={back} onChange={setBack} maxImages={1} uploadFolder="kyc" />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setSelectedOrder(null)}>
-                Cancel
-              </Button>
-              <Button onClick={submitKyc} disabled={submitting}>
-                {submitting ? 'Submitting...' : 'Submit KYC'}
-              </Button>
-            </div>
-          </div>
-        </Modal>
       )}
 
       {actionOrder && actionType && (
