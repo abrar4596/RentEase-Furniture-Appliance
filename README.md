@@ -135,48 +135,32 @@ Run scripts from the monorepo root:
 | `PATCH` | `/api/v1/vendors/profile`          | Vendor | Update store contact details or service pincodes      | `{ businessName?, contactPhone?, servicePincodes? }`      |
 | `GET`   | `/api/v1/vendors/admin/all`        | Admin  | List all vendor registrations for verification review | Header: `Authorization: Bearer <admin_token>`             |
 | `PATCH` | `/api/v1/vendors/admin/:id/verify` | Admin  | Approve or reject vendor store verification           | `{ status: "APPROVED" \| "REJECTED", rejectionReason? }`  |
+| `PATCH` | `/api/v1/vendors/admin/:id/commission` | Admin | Set a vendor-specific commission override (0-100 percent) | `{ commissionPercent: number }` |
 
 ### Inventory & Product Management (Phase 2)
 
-| Method   | Endpoint                       | Auth          | Description                                            | Body / Payload                                              |
-| :------- | :----------------------------- | :------------ | :----------------------------------------------------- | :---------------------------------------------------------- |
-| `POST`   | `/api/v1/products`             | Vendor        | Create product listing (draft mode if unverified)      | `{ title, category, subcategory, tenureTiers, stock, ... }` |
-| `GET`    | `/api/v1/products/vendor/mine` | Vendor        | Get all products owned by current authenticated vendor | Header: `Authorization: Bearer <token>`                     |
-| `GET`    | `/api/v1/products/:id`         | Public        | Get full product details and tenure tiers              | Params: `id`                                                |
-| `PATCH`  | `/api/v1/products/:id`         | Vendor        | Update product details, specs, and pricing tiers       | `{ title?, description?, tenureTiers?, ... }`               |
-| `PATCH`  | `/api/v1/products/:id/stock`   | Vendor        | Atomically update available stock count                | `{ stockCount: number }`                                    |
-| `PATCH`  | `/api/v1/products/:id/status`  | Vendor        | Update listing status (`active`, `draft`, `paused`)    | `{ status: "active" \| "draft" \| "paused" }`               |
-| `DELETE` | `/api/v1/products/:id`         | Vendor        | Delete listing (guarded by vendor ownership)           | Params: `id`                                                |
-| `GET`    | `/api/v1/uploads/signature`    | Vendor, Admin | Generate scoped signed Cloudinary upload params        | Query: `?folder=products \| kyc`                            |
+| Method   | Endpoint                       | Auth            | Description                                            | Body / Payload                                                                                           |
+| :------- | :----------------------------- | :-------------- | :----------------------------------------------------- | :------------------------------------------------------------------------------------------------------- |
+| `POST`   | `/api/v1/products`             | Vendor          | Create product listing (draft mode if unverified)      | `{ title, category, subcategory, tenureTiers, stock, ... }`                                              |
+| `GET`    | `/api/v1/products/vendor/mine` | Vendor          | Get all products owned by current authenticated vendor | Header: `Authorization: Bearer <token>`                                                                  |
+| `GET`    | `/api/v1/products/:id`         | Public          | Get full product details and tenure tiers              | Params: `id`                                                                                             |
+| `PATCH`  | `/api/v1/products/:id`         | Vendor          | Update product details, specs, and pricing tiers       | `{ title?, description?, tenureTiers?, ... }`                                                            |
+| `PATCH`  | `/api/v1/products/:id/stock`   | Vendor          | Atomically update available stock count                | `{ stockCount: number }`                                                                                 |
+| `PATCH`  | `/api/v1/products/:id/status`  | Vendor          | Update listing status (`active`, `draft`, `paused`)    | `{ status: "active" \| "draft" \| "paused" }`                                                            |
+| `DELETE` | `/api/v1/products/:id`         | Vendor          | Delete listing (guarded by vendor ownership)           | Params: `id`                                                                                             |
+| `POST`   | `/api/v1/uploads/signature`    | Vendor / Renter | Generate scoped signed Cloudinary upload params        | Body: `{ folder: "products" \| "kyc" \| "maintenance" }` (`products` → Vendor only, `kyc` → Renter only) |
 
-### Cities & Service Zones (Phase 2)
+---
 
-| Method | Endpoint         | Auth   | Description                                              | Response Envelope                            |
-| :----- | :--------------- | :----- | :------------------------------------------------------- | :------------------------------------------- |
-| `GET`  | `/api/v1/cities` | Public | List active launch cities with serviced 6-digit pincodes | `{ success: true, data: { cities: [...] } }` |
+### City-Aware Catalog & Tenure Calculator (Phase 3)
 
-### Vendor Onboarding & Verification (Phase 2)
+| Method | Endpoint                        | Auth   | Description                                                                     | Query / Body                                                                                                                                                  |
+| :----- | :------------------------------ | :----- | :------------------------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET`  | `/api/v1/catalog`               | Public | Server-rendered, indexed catalog search with filters, sorting, and pagination   | Query: `cityId`, `pincode`, `category`, `subcategory`, `search`, `minPricePaise`, `maxPricePaise`, `zeroDepositOnly`, `availability`, `sort`, `page`, `limit` |
+| `GET`  | `/api/v1/cities/serviceability` | Public | Resolve delivery serviceability by pincode (definitive) or city id (city-level) | Query: `pincode` **or** `cityId` → `{ serviceable, city, requestedPincode? }`                                                                                 |
+| `POST` | `/api/v1/cities/waitlist`       | Public | Capture interest for a not-yet-serviceable city (idempotent per city + contact) | `{ cityName, pincode?, name?, email?, phone? }` (at least one of `email` / `phone`)                                                                           |
 
-| Method  | Endpoint                           | Auth   | Description                                           | Body / Payload                                            |
-| :------ | :--------------------------------- | :----- | :---------------------------------------------------- | :-------------------------------------------------------- |
-| `GET`   | `/api/v1/vendors/me`               | Vendor | Get authenticated vendor's store profile and status   | Header: `Authorization: Bearer <token>`                   |
-| `POST`  | `/api/v1/vendors/profile`          | Vendor | Register initial store profile, city, and pincodes    | `{ businessName, contactPhone, cityId, servicePincodes }` |
-| `PATCH` | `/api/v1/vendors/profile`          | Vendor | Update store contact details or service pincodes      | `{ businessName?, contactPhone?, servicePincodes? }`      |
-| `GET`   | `/api/v1/vendors/admin/all`        | Admin  | List all vendor registrations for verification review | Header: `Authorization: Bearer <admin_token>`             |
-| `PATCH` | `/api/v1/vendors/admin/:id/verify` | Admin  | Approve or reject vendor store verification           | `{ status: "APPROVED" \| "REJECTED", rejectionReason? }`  |
-
-### Inventory & Product Management (Phase 2)
-
-| Method   | Endpoint                       | Auth          | Description                                            | Body / Payload                                              |
-| :------- | :----------------------------- | :------------ | :----------------------------------------------------- | :---------------------------------------------------------- |
-| `POST`   | `/api/v1/products`             | Vendor        | Create product listing (draft mode if unverified)      | `{ title, category, subcategory, tenureTiers, stock, ... }` |
-| `GET`    | `/api/v1/products/vendor/mine` | Vendor        | Get all products owned by current authenticated vendor | Header: `Authorization: Bearer <token>`                     |
-| `GET`    | `/api/v1/products/:id`         | Public        | Get full product details and tenure tiers              | Params: `id`                                                |
-| `PATCH`  | `/api/v1/products/:id`         | Vendor        | Update product details, specs, and pricing tiers       | `{ title?, description?, tenureTiers?, ... }`               |
-| `PATCH`  | `/api/v1/products/:id/stock`   | Vendor        | Atomically update available stock count                | `{ stockCount: number }`                                    |
-| `PATCH`  | `/api/v1/products/:id/status`  | Vendor        | Update listing status (`active`, `draft`, `paused`)    | `{ status: "active" \| "draft" \| "paused" }`               |
-| `DELETE` | `/api/v1/products/:id`         | Vendor        | Delete listing (guarded by vendor ownership)           | Params: `id`                                                |
-| `GET`    | `/api/v1/uploads/signature`    | Vendor, Admin | Generate scoped signed Cloudinary upload params        | Query: `?folder=products \| kyc`                            |
+> **Availability privacy:** public catalog and product responses expose only the derived `availability` bucket (`in_stock` / `limited` / `unavailable`); raw vendor `stockCount` is never returned. The catalog sort key is the denormalized `startingRentPaise`; `GET /api/v1/products/:id` returns the same renter-safe projection.
 
 ---
 
@@ -212,6 +196,16 @@ Run scripts from the monorepo root:
 | `GET/POST/PATCH` | `/api/v1/admin/cities`             | Admin  | List, create, activate, or deactivate service cities                         |
 | `POST`           | `/api/v1/orders/:id/cancel`        | Renter | Cancel a pending order and release inventory                                 |
 
+### Payments, Refunds & Ledger (Phase 5)
+
+| Method | Endpoint                            | Auth   | Description                                                          |
+| :----- | :---------------------------------- | :----- | :------------------------------------------------------------------- |
+| `POST` | `/api/v1/orders/:id/pay`            | Renter | Resume payment for a saved pending order (reuses the Razorpay order) |
+| `POST` | `/api/v1/orders/admin/:id/refund`   | Admin  | Issue a full or partial refund against the upfront rent + deposit    |
+| `GET`  | `/api/v1/orders/admin/:id/payments` | Admin  | Read an order's immutable payment ledger entries and refund records  |
+
+> **Exactly-once settlement:** the client verification (`POST /api/v1/payments/verify`) and the Razorpay webhook share one atomic `PENDING_PAYMENT → PENDING_KYC` transition, so duplicate or replayed events are no-ops. The payment ledger is append-only — entries can never be updated or deleted — with separate immutable entries for upfront rent, security deposit, and each refund.
+
 ---
 
 ## Database Seeding
@@ -241,5 +235,6 @@ For production environments, copy `.env.example` to the hosting-provider secret 
 - **Vendor Approval Invariant:** Only vendors with `verificationStatus === 'APPROVED'` can publish products with `status === 'active'`. Pending or rejected vendors are strictly restricted to `status === 'draft'`.
 - **Vendor Ownership Invariant:** A vendor can only view, update, pause, change stock, or delete their own inventory. Enforced in `productService` by validating `product.vendorId === vendor._id`.
 - **Signed Cloudinary Uploads:** Image uploads use short-lived signatures generated server-side. Direct, unauthenticated image writes to Cloudinary are prohibited.
-#   R e n t E a s e - F u r n i t u r e - A p p l i a n c e  
- 
+  #   R e n t E a s e - F u r n i t u r e - A p p l i a n c e 
+   
+   

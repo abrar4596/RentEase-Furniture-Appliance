@@ -8,7 +8,7 @@ import {
   googleAuthSchema,
   USER_ROLES,
 } from '@rentease/shared';
-import { authController } from '../controllers/auth.controller.js';
+import { authController, validateRefreshOrigin } from '../controllers/auth.controller.js';
 import { validate } from '../middleware/validate.js';
 import { authenticate, authorize } from '../middleware/auth.middleware.js';
 import { env } from '../config/env.js';
@@ -39,9 +39,9 @@ authRouter.post(
 
 authRouter.post('/login', authLimiter, validate({ body: loginSchema }), authController.login);
 
-authRouter.post('/refresh', authController.refresh);
+authRouter.post('/refresh', validateRefreshOrigin, authController.refresh);
 
-authRouter.post('/logout', authController.logout);
+authRouter.post('/logout', validateRefreshOrigin, authController.logout);
 
 authRouter.post('/logout-all', authenticate, authController.logoutAll);
 

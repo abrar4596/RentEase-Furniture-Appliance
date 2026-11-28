@@ -1,3 +1,5 @@
+import { IAuditEvent } from './vendor.js';
+
 export interface IAdminMetrics {
   checkoutInitiated: number;
   checkoutConfirmed: number;
@@ -26,4 +28,17 @@ export interface IAdminOrderSearchResult {
     deductedPaise: number;
     disputed?: boolean;
   };
+  auditTrail?: IAuditEvent[];
+}
+
+export interface IAdminSupportTicket {
+  id: string;
+  type: 'MAINTENANCE' | 'DAMAGE';
+  orderId: string;
+  status: string;
+  subject: string;
+  description: string;
+  createdAt: string;
+  updatedAt?: string;
+  disputed?: boolean;
 }

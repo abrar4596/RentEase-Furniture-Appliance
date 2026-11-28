@@ -92,25 +92,6 @@ export class CheckoutController {
       next(error);
     }
   };
-  public getVendorOrder = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> => {
-    try {
-      res.json({
-        success: true,
-        data: {
-          order: await checkoutService.getVendorOrder(
-            this.requireUser(req),
-            req.params.id as string
-          ),
-        },
-      });
-    } catch (error) {
-      next(error);
-    }
-  };
   public updateVendorOrderStatus = async (
     req: Request,
     res: Response,
@@ -120,8 +101,7 @@ export class CheckoutController {
       const order = await checkoutService.updateVendorOrderStatus(
         this.requireUser(req),
         req.params.id as string,
-        req.body.status,
-        req.body.deliveryPhoto as { publicId: string; url: string } | undefined
+        req.body.status
       );
       res.json({ success: true, data: { order } });
     } catch (error) {
@@ -257,6 +237,118 @@ export class CheckoutController {
       next(error);
     }
   };
+  public listInvoices = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const invoices = await checkoutService.listRentalInvoices(
+        this.requireUser(req),
+        req.params.id as string
+      );
+      res.json({ success: true, data: { invoices } });
+    } catch (error) {
+      next(error);
+    }
+  };
+  public generateInvoices = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const invoices = await checkoutService.generateMonthlyInvoices(
+        this.requireUser(req),
+        req.params.id as string
+      );
+      res.json({ success: true, data: { invoices } });
+    } catch (error) {
+      next(error);
+    }
+  };
+  public startInvoicePayment = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const result = await checkoutService.startInvoicePayment(
+        this.requireUser(req),
+        req.params.id as string,
+        req.params.invoiceId as string
+      );
+      res.json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  };
+  public verifyInvoicePayment = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const invoice = await checkoutService.verifyInvoicePayment(
+        this.requireUser(req),
+        req.params.id as string,
+        req.params.invoiceId as string,
+        req.body
+      );
+      res.json({ success: true, data: { invoice } });
+    } catch (error) {
+      next(error);
+    }
+  };
+  public updateMaintenanceStatus = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const order = await checkoutService.updateMaintenanceStatus(
+        this.requireUser(req),
+        req.params.id as string,
+        req.params.ticketId as string,
+        req.body.status
+      );
+      res.json({ success: true, data: { order } });
+    } catch (error) {
+      next(error);
+    }
+  };
+  public confirmMaintenance = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const order = await checkoutService.confirmMaintenance(
+        this.requireUser(req),
+        req.params.id as string,
+        req.params.ticketId as string
+      );
+      res.json({ success: true, data: { order } });
+    } catch (error) {
+      next(error);
+    }
+  };
+  public disputeDamage = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const order = await checkoutService.disputeDamageClaim(
+        this.requireUser(req),
+        req.params.id as string,
+        req.body.reason
+      );
+      res.json({ success: true, data: { order } });
+    } catch (error) {
+      next(error);
+    }
+  };
   public adminRefund = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       if (!req.user) throw new UnauthorizedError('Authentication required');
@@ -317,10 +409,11 @@ export class CheckoutController {
       }
 
       const event = req.body as RazorpayWebhookBody;
-      const eventId =
+      const entityId =
         event.payload?.refund?.entity?.id ||
         event.payload?.payment?.entity?.id ||
         event.payload?.payment?.entity?.order_id;
+      const eventId = event.event && entityId ? `${event.event}:${entityId}` : undefined;
 
       if (event.event && eventId) {
         const alreadyProcessed = await WebhookEvent.findOne({ eventId });

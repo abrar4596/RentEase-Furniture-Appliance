@@ -5,6 +5,7 @@ import {
   IAuditEvent,
   IPlatformSettings,
   IVendorLedgerEntry,
+  IAdminSupportTicket,
 } from '@rentease/shared';
 import { Order } from '../models/order.model.js';
 import { Product } from '../models/product.model.js';
@@ -42,7 +43,8 @@ export class AdminService {
         activeUnits += order.items.reduce((sum, item) => sum + item.quantity, 0);
       }
     }
-    const activeListedUnits = products.reduce((sum, product) => sum + product.stockCount, 0);
+    const availableUnits = products.reduce((sum, product) => sum + product.stockCount, 0);
+    const activeListedUnits = availableUnits + activeUnits;
 
     const tickets = orders.flatMap((order) =>
       order.maintenanceRequests.map((ticket) => ({
@@ -91,6 +93,17 @@ export class AdminService {
       filter._id = new mongoose.Types.ObjectId(query.orderId);
     }
     const orders = await Order.find(filter).sort({ createdAt: -1 }).limit(100);
+    const orderIds = orders.map((order) => order._id.toString());
+    const auditEvents = await AuditEvent.find({
+      entityType: 'order',
+      entityId: { $in: orderIds },
+    }).sort({ createdAt: -1 });
+    const auditByOrder = new Map<string, typeof auditEvents>();
+    for (const event of auditEvents) {
+      const existing = auditByOrder.get(event.entityId) || [];
+      existing.push(event);
+      auditByOrder.set(event.entityId, existing);
+    }
     return orders.map((order) => ({
       id: order._id.toString(),
       renterId: order.renterId.toString(),
@@ -106,6 +119,7 @@ export class AdminService {
             disputed: order.damageClaim.disputed,
           }
         : undefined,
+      auditTrail: (auditByOrder.get(order._id.toString()) || []).map(formatAudit),
     }));
   }
 
@@ -174,6 +188,8 @@ export class AdminService {
       platformCommissionPercent: number;
       kycWindowHours: number;
       reservationTtlMinutes: number;
+      deliverySlotCapacity: number;
+      blackoutDates: string[];
     }>
   ): Promise<IPlatformSettings> {
     let settings = await PlatformSettings.findOne();
@@ -223,10 +239,51 @@ export class AdminService {
     return entries.map(formatVendorLedger);
   }
 
+  public async listSupportTickets(): Promise<IAdminSupportTicket[]> {
+    const orders = await Order.find({
+      $or: [
+        { maintenanceRequests: { $exists: true, $ne: [] } },
+        { damageClaim: { $exists: true } },
+      ],
+    }).sort({ updatedAt: -1 });
+
+    const tickets: IAdminSupportTicket[] = [];
+    for (const order of orders) {
+      for (const ticket of order.maintenanceRequests) {
+        tickets.push({
+          id: ticket._id.toString(),
+          type: 'MAINTENANCE',
+          orderId: order._id.toString(),
+          status: ticket.status,
+          subject: `${ticket.category || 'GENERAL'} maintenance`,
+          description: ticket.description,
+          createdAt: ticket.createdAt.toISOString(),
+          updatedAt: ticket.resolvedAt?.toISOString(),
+        });
+      }
+      if (order.damageClaim) {
+        tickets.push({
+          id: `${order._id.toString()}-damage`,
+          type: 'DAMAGE',
+          orderId: order._id.toString(),
+          status: order.damageClaim.disputed ? 'DISPUTED' : 'CLAIMED',
+          subject: 'Damage claim',
+          description: order.damageClaim.description,
+          createdAt: order.damageClaim.createdAt.toISOString(),
+          updatedAt: order.damageClaim.arbitratedAt?.toISOString(),
+          disputed: order.damageClaim.disputed,
+        });
+      }
+    }
+    return tickets.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+
   public async recordAudit(
     actorId: string,
     action: string,
-    entityType: 'vendor' | 'kyc' | 'order' | 'city' | 'settings',
+    entityType: 'vendor' | 'kyc' | 'order' | 'city' | 'settings' | 'payout' | 'support',
     entityId: string,
     reason?: string,
     metadata?: Record<string, unknown>

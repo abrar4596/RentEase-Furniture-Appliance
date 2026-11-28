@@ -143,6 +143,54 @@ describe('Phase 7: Vendor Fulfillment and Ledger', () => {
     expect(ledger?.netPayablePaise).toBe(4000_00);
   });
 
+  it('blocks captured-order cancellation and strips KYC media from vendor responses', async () => {
+    const { vendorUser, renter, vendor } = await seed();
+    const order = await Order.create({
+      renterId: renter._id,
+      items: [
+        {
+          productId: new mongoose.Types.ObjectId(),
+          title: 'Protected Sofa',
+          vendorId: vendor._id,
+          tenureMonths: 3,
+          quantity: 1,
+          monthlyRentPaise: 5000_00,
+          securityDepositPaise: 5000_00,
+          lineTotalPaise: 10000_00,
+        },
+      ],
+      deliveryAddress: {
+        fullName: 'Protected Renter',
+        phone: '9876543210',
+        line1: '1 Test Road',
+        city: 'Test City',
+        state: 'Test State',
+        pincode: '302001',
+      },
+      preferredDeliveryDate: '2026-12-01',
+      preferredDeliverySlot: 'morning',
+      subtotalRentPaise: 5000_00,
+      securityDepositPaise: 5000_00,
+      totalUpfrontPaise: 10000_00,
+      status: 'CONFIRMED',
+      razorpayPaymentId: 'pay_phase10_test',
+      kyc: {
+        documentType: 'PAN',
+        documentNumber: 'ABCDE1234F',
+        frontDocument: { publicId: 'private/front', url: 'https://private.example/front' },
+        submittedAt: new Date(),
+      },
+    });
+
+    await expect(
+      checkoutService.cancelOrder(renter._id.toString(), order.id)
+    ).rejects.toThrow('Captured payments cannot be cancelled directly');
+
+    const vendorOrders = await checkoutService.getVendorOrders(vendorUser._id.toString());
+    expect(vendorOrders).toHaveLength(1);
+    expect(vendorOrders[0].kyc).toBeUndefined();
+  });
+
   it('marks valid pending ledger entries paid atomically', async () => {
     const { admin, vendor } = await seed();
     const order = await Order.create({

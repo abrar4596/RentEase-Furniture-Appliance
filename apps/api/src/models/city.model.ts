@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
+import { ICity } from '@rentease/shared';
 
 export interface ICityDocument extends Document<mongoose.Types.ObjectId> {
   _id: mongoose.Types.ObjectId;
@@ -41,3 +42,17 @@ const citySchema = new Schema<ICityDocument>(
 );
 
 export const City = mongoose.model<ICityDocument>('City', citySchema);
+
+/**
+ * Public projection of a city. Exposes the stable `id` (never the raw `_id`)
+ * so API consumers match the shared `ICity` contract.
+ */
+export function formatCity(doc: ICityDocument): ICity {
+  return {
+    id: doc._id.toString(),
+    name: doc.name,
+    state: doc.state,
+    pincodes: doc.pincodes,
+    isActive: doc.isActive,
+  };
+}

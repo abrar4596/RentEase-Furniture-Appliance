@@ -44,7 +44,7 @@ export interface IAuditEvent {
   actorId: string;
   actorRole: 'admin';
   action: string;
-  entityType: 'vendor' | 'kyc' | 'order' | 'city' | 'settings';
+  entityType: 'vendor' | 'kyc' | 'order' | 'city' | 'settings' | 'payout' | 'support';
   entityId: string;
   reason?: string;
   metadata?: Record<string, unknown>;

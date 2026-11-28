@@ -7,8 +7,10 @@ import {
   ProductCondition,
   ProductStatus,
   IProduct,
+  IPublicProduct,
   ProductImage,
   TenureTier,
+  deriveAvailability,
 } from '@rentease/shared';
 
 export interface IProductDocument extends Document<mongoose.Types.ObjectId> {
@@ -25,6 +27,7 @@ export interface IProductDocument extends Document<mongoose.Types.ObjectId> {
   stockCount: number;
   securityDepositPaise: number;
   tenureTiers: TenureTier[];
+  startingRentPaise: number;
   deliveryLeadTimeHours: number;
   status: ProductStatus;
   createdAt: Date;
@@ -100,6 +103,15 @@ const productSchema = new Schema<IProductDocument>(
         monthlyRentPaise: { type: Number, required: true },
       },
     ],
+    // Derived: lowest monthly rent across tiers. Kept as a stored field so the
+    // catalog can filter/sort on price using a single index.
+    startingRentPaise: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0,
+      index: true,
+    },
     deliveryLeadTimeHours: {
       type: Number,
       default: 48,
@@ -116,8 +128,21 @@ const productSchema = new Schema<IProductDocument>(
   }
 );
 
+// Derive `startingRentPaise` before validation so the "from ₹X /month" price is
+// always in sync with the vendor's configured tenure tiers.
+productSchema.pre('validate', function (next) {
+  const rents = (this.tenureTiers ?? [])
+    .map((tier) => tier.monthlyRentPaise)
+    .filter((rent) => Number.isFinite(rent) && rent > 0);
+  this.startingRentPaise = rents.length > 0 ? Math.min(...rents) : 0;
+  next();
+});
+
 // Composite indexes for catalog search & vendor dashboard
 productSchema.index({ cityId: 1, status: 1, category: 1 });
+productSchema.index({ cityId: 1, status: 1, category: 1, startingRentPaise: 1 });
+productSchema.index({ status: 1, startingRentPaise: 1 });
+productSchema.index({ status: 1, createdAt: -1 });
 productSchema.index({ vendorId: 1, status: 1 });
 
 export function formatProduct(
@@ -150,11 +175,29 @@ export function formatProduct(
     stockCount: doc.stockCount,
     securityDepositPaise: doc.securityDepositPaise,
     tenureTiers: doc.tenureTiers,
+    startingRentPaise: resolveStartingRent(doc),
     deliveryLeadTimeHours: doc.deliveryLeadTimeHours,
     status: doc.status,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };
+}
+
+function resolveStartingRent(doc: IProductDocument): number {
+  if (Number.isFinite(doc.startingRentPaise) && doc.startingRentPaise > 0) {
+    return doc.startingRentPaise;
+  }
+  const rents = (doc.tenureTiers ?? []).map((tier) => tier.monthlyRentPaise);
+  return rents.length > 0 ? Math.min(...rents) : 0;
+}
+
+/**
+ * Projects a full product into its renter-facing shape, dropping the raw
+ * `stockCount` and replacing it with a derived availability bucket.
+ */
+export function toPublicProduct(product: IProduct): IPublicProduct {
+  const { stockCount, ...rest } = product;
+  return { ...rest, availability: deriveAvailability(stockCount) };
 }
 
 export const Product = mongoose.model<IProductDocument>('Product', productSchema);

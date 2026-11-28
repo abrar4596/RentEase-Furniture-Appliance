@@ -29,7 +29,7 @@ export class PayoutController {
       await adminService.recordAudit(
         req.user._id.toString(),
         'VENDOR_PAYOUT_MARKED_PAID',
-        'order',
+        'payout',
         req.body.vendorId,
         req.body.payoutReference,
         { ledgerEntryIds: req.body.ledgerEntryIds }

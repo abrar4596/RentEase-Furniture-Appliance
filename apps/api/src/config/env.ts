@@ -21,6 +21,7 @@ const envSchema = z.object({
   RAZORPAY_KEY_ID: z.string().default('rzp_test_placeholder_key_id'),
   RAZORPAY_KEY_SECRET: z.string().default('rzp_test_placeholder_key_secret'),
   RAZORPAY_WEBHOOK_SECRET: z.string().default('rzp_test_webhook_secret_key'),
+  GOOGLE_CLIENT_ID: z.string().default(''),
   PLATFORM_COMMISSION_PERCENT: z.coerce.number().min(0).max(100).default(15),
   KYC_WINDOW_HOURS: z.coerce.number().int().min(1).max(168).default(24),
   RESERVATION_TTL_MINUTES: z.coerce.number().int().min(5).max(60).default(15),
@@ -64,6 +65,7 @@ const productionEnvSchema = z.object({
   RAZORPAY_KEY_ID: nonPlaceholder,
   RAZORPAY_KEY_SECRET: nonPlaceholder,
   RAZORPAY_WEBHOOK_SECRET: nonPlaceholder,
+  GOOGLE_CLIENT_ID: nonPlaceholder,
 });
 
 function reportInvalidEnvironment(error: z.ZodError): never {

@@ -54,6 +54,39 @@ export async function authenticate(
 }
 
 /**
+ * Attaches `req.user` when a valid Bearer token is present, but never rejects the
+ * request. Used by endpoints that serve both authenticated renters and anonymous
+ * guest (device-cookie) sessions, such as the cart.
+ */
+export async function optionalAuthenticate(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      next();
+      return;
+    }
+
+    const token = authHeader.substring(7).trim();
+    try {
+      const payload = jwt.verify(token, env.JWT_ACCESS_SECRET) as TokenPayload;
+      const user = await User.findById(payload.sub);
+      if (user && user.status !== 'suspended') {
+        req.user = user;
+      }
+    } catch {
+      // Invalid/expired token is treated as an anonymous session.
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
  * Authorizes request based on user roles
  */
 export function authorize(...roles: UserRole[]) {

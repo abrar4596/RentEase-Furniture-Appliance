@@ -3,8 +3,9 @@
 import React from 'react';
 import Link from 'next/link';
 import { useAuth } from '../../context/AuthContext';
-import { MapPin, User, LogOut, Store, Shield, ShoppingCart } from 'lucide-react';
+import { User, LogOut, Store, Shield, ShoppingCart } from 'lucide-react';
 import { Button } from '../ui/Button';
+import { CitySelector } from './CitySelector';
 
 export function HeaderNav() {
   const { user, logout } = useAuth();
@@ -29,14 +30,7 @@ export function HeaderNav() {
 
         {/* Center: City Selector Pill & Portal Quick Links */}
         <div className="flex items-center gap-3">
-          <Link
-            href="/catalog"
-            className="flex items-center gap-1.5 rounded-full border border-gray-300 bg-gray-50 px-3.5 py-1.5 text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors focus-visible:ring-2 focus-visible:ring-brand-500"
-          >
-            <MapPin className="h-3.5 w-3.5 text-brand-600 shrink-0" />
-            <span className="hidden xs:inline">City:</span>
-            <span className="font-semibold text-gray-900">Select City / Pincode</span>
-          </Link>
+          <CitySelector />
 
           {user?.role === 'vendor' && (
             <Link href="/vendor/dashboard">

@@ -4,6 +4,7 @@ import {
   updateProductSchema,
   updateProductStockSchema,
   updateProductStatusSchema,
+  catalogQuerySchema,
   USER_ROLES,
 } from '@rentease/shared';
 import { productController } from '../controllers/product.controller.js';
@@ -13,7 +14,11 @@ import { validate } from '../middleware/validate.js';
 export const productRouter = Router();
 
 // Public catalog
-productRouter.get('/catalog', productController.listCatalog);
+productRouter.get(
+  '/catalog',
+  validate({ query: catalogQuerySchema }),
+  productController.listCatalog
+);
 
 // Vendor Product Management
 productRouter.post(

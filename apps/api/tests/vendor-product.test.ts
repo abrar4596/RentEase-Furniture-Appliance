@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import request from 'supertest';
 import mongoose from 'mongoose';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { getTestMongoUri } from './global-setup.js';
 import {
   USER_ROLES,
   PRODUCT_CATEGORIES,
@@ -18,7 +18,6 @@ import { authService } from '../src/services/auth.service.js';
 import { cityService } from '../src/services/city.service.js';
 
 describe('Phase 2: Vendor Onboarding & Inventory Management Integration Tests', () => {
-  let mongoServer: MongoMemoryServer;
   const app = createApp();
 
   let adminToken: string;
@@ -27,16 +26,15 @@ describe('Phase 2: Vendor Onboarding & Inventory Management Integration Tests', 
   let renterToken: string;
 
   let jaipurId: string;
+  let indoreId: string;
   let vendor1ProfileId: string;
 
   beforeAll(async () => {
-    mongoServer = await MongoMemoryServer.create();
-    await mongoose.connect(mongoServer.getUri());
+    await mongoose.connect(getTestMongoUri());
   });
 
   afterAll(async () => {
     await mongoose.disconnect();
-    await mongoServer.stop();
   });
 
   beforeEach(async () => {
@@ -49,6 +47,8 @@ describe('Phase 2: Vendor Onboarding & Inventory Management Integration Tests', 
     await cityService.seedCities();
     const jaipur = await City.findOne({ name: 'Jaipur' });
     jaipurId = jaipur!._id.toString();
+    const indore = await City.findOne({ name: 'Indore' });
+    indoreId = indore!._id.toString();
 
     // 1. Admin
     const adminUser = await User.create({
@@ -188,6 +188,86 @@ describe('Phase 2: Vendor Onboarding & Inventory Management Integration Tests', 
         .get('/api/v1/vendors/me')
         .set('Authorization', `Bearer ${vendor1Token}`);
       expect(meRes.body.data.profile.verificationStatus).toBe(VENDOR_STATUSES.APPROVED);
+    });
+  });
+
+  describe('Vendor Profile Update & Verification Hardening', () => {
+    it('rejects a city switch that would leave stale, non-serviceable pincodes', async () => {
+      const createRes = await request(app)
+        .post('/api/v1/vendors/profile')
+        .set('Authorization', `Bearer ${vendor1Token}`)
+        .send({
+          businessName: 'Jaipur Only Store',
+          contactPhone: '9829012345',
+          cityId: jaipurId,
+          servicePincodes: ['302001'],
+        });
+      expect(createRes.status).toBe(201);
+
+      // Switch to Indore while keeping the Jaipur pincode -> must be rejected
+      const res = await request(app)
+        .patch('/api/v1/vendors/profile')
+        .set('Authorization', `Bearer ${vendor1Token}`)
+        .send({ cityId: indoreId });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.message).toContain('do not belong to Indore');
+    });
+
+    it('allows a city switch when the service pincodes match the new city', async () => {
+      await request(app)
+        .post('/api/v1/vendors/profile')
+        .set('Authorization', `Bearer ${vendor1Token}`)
+        .send({
+          businessName: 'Relocating Store',
+          contactPhone: '9829012345',
+          cityId: jaipurId,
+          servicePincodes: ['302001'],
+        });
+
+      const res = await request(app)
+        .patch('/api/v1/vendors/profile')
+        .set('Authorization', `Bearer ${vendor1Token}`)
+        .send({ cityId: indoreId, servicePincodes: ['452001', '452002'] });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.profile.cityName).toBe('Indore');
+      expect(res.body.data.profile.servicePincodes).toEqual(['452001', '452002']);
+    });
+
+    it('clears a stale rejection reason when an admin later approves the vendor', async () => {
+      const createRes = await request(app)
+        .post('/api/v1/vendors/profile')
+        .set('Authorization', `Bearer ${vendor1Token}`)
+        .send({
+          businessName: 'Needs Review Store',
+          contactPhone: '9829012345',
+          cityId: jaipurId,
+          servicePincodes: ['302001'],
+        });
+      const profileId = createRes.body.data.profile.id;
+
+      const rejectRes = await request(app)
+        .patch(`/api/v1/vendors/admin/${profileId}/verify`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: VENDOR_STATUSES.REJECTED, rejectionReason: 'KYC documents unreadable' });
+
+      expect(rejectRes.status).toBe(200);
+      expect(rejectRes.body.data.profile.rejectionReason).toBe('KYC documents unreadable');
+
+      const approveRes = await request(app)
+        .patch(`/api/v1/vendors/admin/${profileId}/verify`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: VENDOR_STATUSES.APPROVED });
+
+      expect(approveRes.status).toBe(200);
+      expect(approveRes.body.data.profile.verificationStatus).toBe(VENDOR_STATUSES.APPROVED);
+      expect(approveRes.body.data.profile.rejectionReason).toBeUndefined();
+
+      const meRes = await request(app)
+        .get('/api/v1/vendors/me')
+        .set('Authorization', `Bearer ${vendor1Token}`);
+      expect(meRes.body.data.profile.rejectionReason).toBeUndefined();
     });
   });
 

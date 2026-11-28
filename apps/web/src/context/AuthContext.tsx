@@ -1,15 +1,26 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { IUser, LoginInput, RegisterInput } from '@rentease/shared';
+import { IUser, LoginInput, RegisterInput, USER_ROLES, UserRole } from '@rentease/shared';
+
+export function getRoleRedirectPath(role: UserRole): string {
+  switch (role) {
+    case USER_ROLES.ADMIN:
+      return '/admin';
+    case USER_ROLES.VENDOR:
+      return '/vendor/dashboard';
+    default:
+      return '/';
+  }
+}
 
 interface AuthContextValue {
   user: IUser | null;
   accessToken: string | null;
   isLoading: boolean;
-  login: (input: LoginInput) => Promise<void>;
-  register: (input: RegisterInput) => Promise<void>;
-  googleLogin: (credential: string) => Promise<void>;
+  login: (input: LoginInput) => Promise<IUser>;
+  register: (input: RegisterInput) => Promise<IUser>;
+  googleLogin: (credential: string) => Promise<IUser>;
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
   refreshSession: () => Promise<boolean>;
@@ -79,7 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, [accessToken, refreshSession]);
 
-  const login = async (input: LoginInput): Promise<void> => {
+  const login = async (input: LoginInput): Promise<IUser> => {
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -94,9 +105,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     setUser(data.data.user);
     setAccessToken(data.data.accessToken);
+    return data.data.user as IUser;
   };
 
-  const register = async (input: RegisterInput): Promise<void> => {
+  const register = async (input: RegisterInput): Promise<IUser> => {
     const res = await fetch(`${API_BASE}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -111,9 +123,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     setUser(data.data.user);
     setAccessToken(data.data.accessToken);
+    return data.data.user as IUser;
   };
 
-  const googleLogin = async (credential: string): Promise<void> => {
+  const googleLogin = async (credential: string): Promise<IUser> => {
     const res = await fetch(`${API_BASE}/auth/google`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -128,6 +141,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     setUser(data.data.user);
     setAccessToken(data.data.accessToken);
+    return data.data.user as IUser;
   };
 
   const logout = async (): Promise<void> => {

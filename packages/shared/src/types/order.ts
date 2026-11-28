@@ -38,9 +38,14 @@ export interface MaintenanceRequest {
   id: string;
   description: string;
   photos: MaintenancePhoto[];
-  status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED';
+  category: 'GENERAL' | 'ELECTRICAL' | 'PLUMBING' | 'FURNITURE' | 'APPLIANCE';
+  status: 'OPEN' | 'ASSIGNED' | 'IN_PROGRESS' | 'RESOLVED';
+  assignedVendorId?: string;
+  assignedAt?: string;
+  inProgressAt?: string;
   createdAt: string;
   resolvedAt?: string;
+  renterConfirmedAt?: string;
 }
 
 export interface RentalReturn {
@@ -48,6 +53,8 @@ export interface RentalReturn {
   preferredPickupDate: string;
   reason?: string;
   returnedAt?: string;
+  depositRefundPaise?: Paise;
+  depositRefundStatus?: 'PENDING' | 'PROCESSED';
 }
 
 export interface DamageClaim {
@@ -80,6 +87,8 @@ export interface IOrder {
   deliveredAt?: string;
   rentalStartAt?: string;
   rentalEndAt?: string;
+  nextDueAt?: string;
+  overdueAt?: string;
   maintenanceRequests: MaintenanceRequest[];
   returnRequest?: RentalReturn;
   damageClaim?: DamageClaim;

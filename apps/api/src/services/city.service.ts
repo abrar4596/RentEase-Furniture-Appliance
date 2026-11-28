@@ -1,4 +1,7 @@
+import mongoose from 'mongoose';
+import { CreateWaitlistEntryInput, IWaitlistEntry } from '@rentease/shared';
 import { City, ICityDocument } from '../models/city.model.js';
+import { WaitlistEntry, formatWaitlistEntry } from '../models/waitlist.model.js';
 import { NotFoundError } from '../middleware/error-handler.js';
 import { logger } from '../utils/logger.js';
 
@@ -46,6 +49,60 @@ export class CityService {
   public async isPincodeServiced(cityId: string, pincode: string): Promise<boolean> {
     const city = await City.findOne({ _id: cityId, isActive: true, pincodes: pincode });
     return Boolean(city);
+  }
+
+  /**
+   * Resolves whether RentEase currently serves a pincode (definitive) or a city
+   * (city-level). Used to drive the "not yet in your city" + waitlist flow.
+   */
+  public async checkServiceability(params: {
+    pincode?: string;
+    cityId?: string;
+  }): Promise<{ serviceable: boolean; city: ICityDocument | null; requestedPincode?: string }> {
+    if (params.pincode) {
+      const city = await City.findOne({ isActive: true, pincodes: params.pincode });
+      return { serviceable: Boolean(city), city: city ?? null, requestedPincode: params.pincode };
+    }
+
+    if (params.cityId && mongoose.isValidObjectId(params.cityId)) {
+      const city = await City.findOne({ _id: params.cityId, isActive: true });
+      return { serviceable: Boolean(city), city: city ?? null };
+    }
+
+    return { serviceable: false, city: null };
+  }
+
+  /**
+   * Captures waitlist interest for a city that is not yet serviceable.
+   * Idempotent per city + contact channel so repeat submissions do not duplicate.
+   */
+  public async joinWaitlist(input: CreateWaitlistEntryInput): Promise<IWaitlistEntry> {
+    const contactFilters: Array<Record<string, string>> = [];
+    if (input.email) contactFilters.push({ email: input.email });
+    if (input.phone) contactFilters.push({ phone: input.phone });
+
+    if (contactFilters.length > 0) {
+      const existing = await WaitlistEntry.findOne({
+        cityName: input.cityName,
+        $or: contactFilters,
+      });
+      if (existing) {
+        return formatWaitlistEntry(existing);
+      }
+    }
+
+    const created = await WaitlistEntry.create({
+      cityName: input.cityName,
+      pincode: input.pincode,
+      name: input.name,
+      email: input.email,
+      phone: input.phone,
+    });
+    logger.info(
+      { city: created.cityName, pincode: created.pincode },
+      'Waitlist signup captured for unserviceable city'
+    );
+    return formatWaitlistEntry(created);
   }
 
   public async seedCities(): Promise<void> {

@@ -1,162 +1,130 @@
-'use client';
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { Clock, MapPin, Store, Tag } from 'lucide-react';
+import { formatINR, PRODUCT_CONDITIONS, ProductCondition } from '@rentease/shared';
+import { fetchProduct } from '../../../lib/api';
+import { ProductGallery } from '../../../components/catalog/ProductGallery';
+import { ProductPurchasePanel } from '../../../components/catalog/ProductPurchasePanel';
+import { Card, CardContent } from '../../../components/ui';
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import { IProduct, calculateUpfrontDue, formatINR } from '@rentease/shared';
-import { Button, Card, CardContent, Skeleton } from '../../../components/ui';
-import { Clock, MapPin, ShieldCheck } from 'lucide-react';
-import { useAuth } from '../../../context/AuthContext';
-import { useToast } from '../../../components/ui';
+export const dynamic = 'force-dynamic';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
+type Params = { id: string };
 
-export default function ProductDetailPage() {
-  const { accessToken } = useAuth();
-  const { success, error: toastError } = useToast();
-  const params = useParams();
-  const router = useRouter();
-  const [product, setProduct] = useState<IProduct | null>(null);
-  const [selectedTenure, setSelectedTenure] = useState<number>(1);
-  const [isLoading, setIsLoading] = useState(true);
+const CONDITION_LABELS: Record<ProductCondition, string> = {
+  [PRODUCT_CONDITIONS.BRAND_NEW]: 'Brand new',
+  [PRODUCT_CONDITIONS.LIKE_NEW]: 'Like new',
+  [PRODUCT_CONDITIONS.REFURBISHED]: 'Refurbished',
+};
 
-  useEffect(() => {
-    const id = Array.isArray(params.id) ? params.id[0] : params.id;
-    if (!id) return;
-    fetch(`${API_BASE}/products/${id}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) {
-          setProduct(data.data.product);
-          setSelectedTenure(data.data.product.tenureTiers[0]?.tenureMonths ?? 1);
-        }
-      })
-      .finally(() => setIsLoading(false));
-  }, [params.id]);
+function deliveryLabel(hours: number): string {
+  return hours <= 48 ? '24–48h delivery' : `${hours}h delivery`;
+}
 
-  const selectedTier = useMemo(
-    () => product?.tenureTiers.find((tier) => tier.tenureMonths === selectedTenure),
-    [product, selectedTenure]
-  );
-  const upfrontDue =
-    product && selectedTier
-      ? calculateUpfrontDue(selectedTier.monthlyRentPaise, product.securityDepositPaise)
-      : 0;
+export async function generateMetadata({ params }: { params: Promise<Params> }): Promise<Metadata> {
+  const { id } = await params;
+  const product = await fetchProduct(id);
 
-  const addToCart = async () => {
-    if (!accessToken) {
-      router.push(`/login?next=${encodeURIComponent(`/catalog/${params.id}`)}`);
-      return;
-    }
-    try {
-      const res = await fetch(`${API_BASE}/cart/items`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ productId: product?.id, tenureMonths: selectedTenure, quantity: 1 }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || 'Could not add item');
-      success('Added to cart', product?.title);
-      router.push('/cart');
-    } catch (error) {
-      toastError(error instanceof Error ? error.message : 'Could not add item', 'Cart');
-    }
+  if (!product) {
+    return { title: 'Rental not found | RentEase' };
+  }
+
+  const monthly = formatINR(product.startingRentPaise);
+  const description =
+    `Rent this ${product.subcategory.toLowerCase()} in ${product.cityName ?? 'your city'} from ` +
+    `${monthly}/month with flexible 1, 3, 6, and 12-month tenures` +
+    `${product.securityDepositPaise === 0 ? ' and a ₹0 deposit' : ''}. ${product.description}`;
+
+  return {
+    title: `${product.title} on rent from ${monthly}/month | RentEase`,
+    description: description.slice(0, 300),
+    openGraph: {
+      title: product.title,
+      description: description.slice(0, 300),
+      images: product.images[0]?.url ? [product.images[0].url] : undefined,
+    },
   };
+}
 
-  if (isLoading)
-    return (
-      <div className="mx-auto max-w-7xl px-4 py-8">
-        <Skeleton className="h-96 w-full" />
-      </div>
-    );
-  if (!product)
-    return (
-      <div className="mx-auto max-w-3xl px-4 py-16 text-center">
-        <h1 className="text-xl font-bold">Product unavailable</h1>
-        <Button className="mt-4" onClick={() => router.push('/catalog')}>
-          Back to catalog
-        </Button>
-      </div>
-    );
+export default async function ProductDetailPage({ params }: { params: Promise<Params> }) {
+  const { id } = await params;
+  const product = await fetchProduct(id);
+
+  if (!product) notFound();
+
+  const specs = Object.entries(product.specs);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <nav className="mb-4 text-sm text-gray-500" aria-label="Breadcrumb">
+        <Link href="/catalog" className="hover:text-brand-700">
+          Catalog
+        </Link>
+        <span className="mx-2">/</span>
+        <span className="text-gray-700">{product.title}</span>
+      </nav>
+
       <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-          {product.images[0]?.url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={product.images[0].url}
-              alt={product.title}
-              className="h-[420px] w-full object-cover"
-            />
-          ) : (
-            <div className="flex h-[420px] items-center justify-center text-gray-400">
-              No image available
-            </div>
+        <div className="space-y-6">
+          <ProductGallery images={product.images} title={product.title} />
+
+          {specs.length > 0 && (
+            <Card>
+              <CardContent className="p-5">
+                <h2 className="mb-3 text-lg font-semibold text-gray-900">Specifications</h2>
+                <dl className="divide-y divide-gray-100">
+                  {specs.map(([key, value]) => (
+                    <div key={key} className="grid grid-cols-2 gap-4 py-2 text-sm">
+                      <dt className="text-gray-500">{key}</dt>
+                      <dd className="font-medium text-gray-900">{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </CardContent>
+            </Card>
           )}
         </div>
+
         <div className="space-y-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">
             {product.subcategory}
           </p>
           <h1 className="text-3xl font-bold text-gray-900">{product.title}</h1>
           <p className="text-gray-600">{product.description}</p>
+
           <div className="flex flex-wrap gap-4 text-sm text-gray-600">
-            <span className="flex items-center gap-1">
-              <MapPin className="h-4 w-4 text-brand-600" />
-              {product.cityName}
-            </span>
+            {product.cityName && (
+              <span className="flex items-center gap-1">
+                <MapPin className="h-4 w-4 text-brand-600" />
+                {product.cityName}
+              </span>
+            )}
             <span className="flex items-center gap-1">
               <Clock className="h-4 w-4 text-brand-600" />
-              {product.deliveryLeadTimeHours <= 48
-                ? '24–48h delivery'
-                : `${product.deliveryLeadTimeHours}h delivery`}
+              {deliveryLabel(product.deliveryLeadTimeHours)}
+            </span>
+            <span className="flex items-center gap-1">
+              <Tag className="h-4 w-4 text-brand-600" />
+              {CONDITION_LABELS[product.condition]}
             </span>
           </div>
 
           <Card>
             <CardContent className="space-y-5 p-5">
-              <div>
-                <p className="mb-2 text-sm font-semibold text-gray-800">Choose tenure</p>
-                <div className="grid grid-cols-4 gap-2">
-                  {product.tenureTiers.map((tier) => (
-                    <button
-                      key={tier.tenureMonths}
-                      type="button"
-                      onClick={() => setSelectedTenure(tier.tenureMonths)}
-                      className={`rounded-lg border px-2 py-2 text-sm font-semibold ${selectedTenure === tier.tenureMonths ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-700'}`}
-                    >
-                      {tier.tenureMonths} mo
-                    </button>
-                  ))}
+              {product.vendorBusinessName && (
+                <div className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                  <Store className="h-4 w-4 shrink-0 text-brand-600" />
+                  <span>
+                    Sold &amp; delivered by{' '}
+                    <strong className="font-semibold text-gray-900">
+                      {product.vendorBusinessName}
+                    </strong>
+                  </span>
                 </div>
-              </div>
+              )}
 
-              {selectedTier && (
-                <div className="space-y-2 border-t border-gray-100 pt-4">
-                  <div className="flex justify-between text-sm">
-                    <span>Monthly rent</span>
-                    <strong>{formatINR(selectedTier.monthlyRentPaise)}</strong>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span>Refundable deposit</span>
-                    <strong>{formatINR(product.securityDepositPaise)}</strong>
-                  </div>
-                  <div className="flex justify-between border-t border-gray-100 pt-3 text-base">
-                    <span className="font-semibold">Pay upfront</span>
-                    <strong className="text-brand-700">{formatINR(upfrontDue)}</strong>
-                  </div>
-                </div>
-              )}
-              <Button className="w-full" disabled={!selectedTier} onClick={addToCart}>
-                Add to cart
-              </Button>
-              {product.securityDepositPaise === 0 && (
-                <p className="flex items-center justify-center gap-1 text-xs font-semibold text-emerald-700">
-                  <ShieldCheck className="h-4 w-4" />
-                  Zero-deposit rental
-                </p>
-              )}
+              <ProductPurchasePanel product={product} />
             </CardContent>
           </Card>
         </div>

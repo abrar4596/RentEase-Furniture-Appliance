@@ -122,6 +122,20 @@ export class AdminController {
       next(error);
     }
   };
+  public supportTickets = async (
+    _req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      res.json({
+        success: true,
+        data: { tickets: await adminService.listSupportTickets() },
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
 }
 
 export const adminController = new AdminController();

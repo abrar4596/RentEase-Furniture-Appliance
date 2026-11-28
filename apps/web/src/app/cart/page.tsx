@@ -362,9 +362,7 @@ function CartContent() {
         throw new Error(verifyData.error?.message || 'Payment confirmation failed');
       }
       success('Payment successful', 'Complete your KYC to confirm the delivery');
-      // Redirect directly to the KYC submission page so the renter can
-      // complete it in one step immediately after payment.
-      router.push(`/kyc/${(verifyData.data.order as { id: string }).id}`);
+      router.push('/orders');
     } catch (error) {
       if (error instanceof PaymentDismissedError) {
         toastError(

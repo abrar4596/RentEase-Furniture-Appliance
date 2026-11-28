@@ -3,7 +3,6 @@ import { env } from './config/env.js';
 import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { logger } from './utils/logger.js';
 import { checkoutService } from './services/checkout.service.js';
-import { runKycTimeoutJob } from './jobs/kyc-timeout.job.js';
 
 async function bootstrap(): Promise<void> {
   const app = createApp();
@@ -19,10 +18,8 @@ async function bootstrap(): Promise<void> {
   });
 
   let reconciliationTimer: NodeJS.Timeout | undefined;
-  let kycTimeoutTimer: NodeJS.Timeout | undefined;
-
+  let overdueInvoiceTimer: NodeJS.Timeout | undefined;
   if (env.NODE_ENV !== 'test') {
-    // Reconcile expired inventory locks every 60 s.
     reconciliationTimer = setInterval(() => {
       checkoutService
         .reconcileExpiredLocks()
@@ -34,21 +31,24 @@ async function bootstrap(): Promise<void> {
         );
     }, 60 * 1000);
     reconciliationTimer.unref();
-
-    // Run KYC timeout / reminder job every 15 minutes.
-    // Run once immediately on startup to pick up any orders that lapsed during downtime.
-    runKycTimeoutJob().catch((err) => logger.error({ err }, 'Initial KYC timeout job failed'));
-    kycTimeoutTimer = setInterval(() => {
-      runKycTimeoutJob().catch((err) => logger.error({ err }, 'KYC timeout job failed'));
-    }, 15 * 60 * 1000);
-    kycTimeoutTimer.unref();
+    overdueInvoiceTimer = setInterval(() => {
+      checkoutService
+        .markOverdueInvoices()
+        .then((count) => {
+          if (count > 0) logger.info({ invoices: count }, 'Marked overdue rental invoices');
+        })
+        .catch((error) =>
+          logger.error({ err: error }, 'Rental overdue reconciliation failed')
+        );
+    }, 5 * 60 * 1000);
+    overdueInvoiceTimer.unref();
   }
 
   // Graceful shutdown handling
   async function gracefulShutdown(signal: string): Promise<void> {
     logger.info({ signal }, `Received ${signal}. Initiating graceful shutdown...`);
     if (reconciliationTimer) clearInterval(reconciliationTimer);
-    if (kycTimeoutTimer) clearInterval(kycTimeoutTimer);
+    if (overdueInvoiceTimer) clearInterval(overdueInvoiceTimer);
 
     server.close(async () => {
       logger.info('HTTP server closed');

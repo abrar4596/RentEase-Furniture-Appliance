@@ -1,8 +1,20 @@
 import type { Metadata, Viewport } from 'next';
+import Script from 'next/script';
 import '../styles/globals.css';
 import { ToastProvider } from '../components/ui/Toast';
 import { AuthProvider } from '../context/AuthContext';
 import { HeaderNav } from '../components/layout/HeaderNav';
+import { RAZORPAY_SCRIPT_ID } from '../lib/razorpay';
+
+// `next/script`'s exported props type resolves React from the hoisted, untyped
+// `react` package here, which drops `src` from its signature even though both
+// the runtime and the docs support it. Spreading keeps us type-safe without
+// changing runtime behaviour.
+const RAZORPAY_SCRIPT_PROPS = {
+  id: RAZORPAY_SCRIPT_ID,
+  src: 'https://checkout.razorpay.com/v1/checkout.js',
+  strategy: 'afterInteractive',
+} as const;
 
 export const metadata: Metadata = {
   title: 'RentEase - Hyperlocal Furniture & Appliance Rentals',
@@ -40,6 +52,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </p>
               </div>
             </footer>
+
+            {/* Razorpay hosted Checkout. Loaded once; the payment flow waits for it. */}
+            <Script {...RAZORPAY_SCRIPT_PROPS} />
           </AuthProvider>
         </ToastProvider>
       </body>

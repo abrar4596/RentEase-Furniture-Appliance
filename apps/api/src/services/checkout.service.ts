@@ -7,12 +7,14 @@ import {
   VENDOR_STATUSES,
   assertValidOrderTransition,
   calculateUpfrontDue,
+  calculateDepositSettlement,
+  RENTAL_INVOICE_STATUSES,
 } from '@rentease/shared';
 import { env } from '../config/env.js';
 import { Cart } from '../models/cart.model.js';
 import { Product } from '../models/product.model.js';
 import { VendorProfile } from '../models/vendor.model.js';
-import { Order, formatOrder } from '../models/order.model.js';
+import { Order, formatOrder, formatOrderForVendor } from '../models/order.model.js';
 import { InventoryLock, IInventoryLockDocument } from '../models/inventory-lock.model.js';
 import {
   ConflictError,
@@ -26,6 +28,10 @@ import { PlatformSettings } from '../models/platform-settings.model.js';
 import { deliverySlotService } from './delivery-slot.service.js';
 import { paymentGateway } from '../adapters/payment-gateway.adapter.js';
 import { paymentService } from './payment.service.js';
+import { paymentLedgerService } from './payment-ledger.service.js';
+import { RentalInvoice, formatRentalInvoice } from '../models/rental-invoice.model.js';
+import { User } from '../models/user.model.js';
+import { emailService } from './email.service.js';
 
 export class CheckoutService {
   public async createCheckout(
@@ -237,7 +243,7 @@ export class CheckoutService {
         ],
       },
     }).sort({ createdAt: -1 });
-    return orders.map(formatOrder);
+    return orders.map(formatOrderForVendor);
   }
 
   public async updateVendorOrderStatus(
@@ -267,6 +273,9 @@ export class CheckoutService {
         : 1;
       end.setMonth(end.getMonth() + tenureMonths);
       order.rentalEndAt = end;
+      const nextDue = new Date(start);
+      nextDue.setMonth(nextDue.getMonth() + 1);
+      order.nextDueAt = nextDue;
     }
     if (nextStatus === ORDER_STATES.OUT_FOR_DELIVERY) {
       order.outForDeliveryAt = new Date();
@@ -288,6 +297,11 @@ export class CheckoutService {
     if (!order) throw new NotFoundError('Order not found');
     if (order.renterId.toString() !== userId)
       throw new ForbiddenError('You cannot cancel this order');
+    if (order.razorpayPaymentId) {
+      throw new ValidationError(
+        'Captured payments cannot be cancelled directly. Request an admin refund first.'
+      );
+    }
     assertValidOrderTransition(order.status, ORDER_STATES.CANCELLED);
     order.status = ORDER_STATES.CANCELLED;
     await order.save();
@@ -438,7 +452,11 @@ export class CheckoutService {
   public async addMaintenanceRequest(
     userId: string,
     orderId: string,
-    input: { description: string; photos: Array<{ publicId: string; url: string }> }
+    input: {
+      description: string;
+      category?: 'GENERAL' | 'ELECTRICAL' | 'PLUMBING' | 'FURNITURE' | 'APPLIANCE';
+      photos: Array<{ publicId: string; url: string }>;
+    }
   ): Promise<IOrder> {
     const order = await Order.findById(orderId);
     if (!order) throw new NotFoundError('Order not found');
@@ -450,6 +468,7 @@ export class CheckoutService {
       _id: new mongoose.Types.ObjectId(),
       description: input.description,
       photos: input.photos,
+      category: input.category || 'GENERAL',
       status: 'OPEN',
       createdAt: new Date(),
     });
@@ -469,9 +488,282 @@ export class CheckoutService {
     if (order.status !== ORDER_STATES.ACTIVE)
       throw new ValidationError('Tenure can be extended only for active rentals');
     if (!order.rentalEndAt) throw new ValidationError('Rental end date is missing');
+
+    let extensionAmountPaise = 0;
+    for (const item of order.items) {
+      const product = await Product.findById(item.productId);
+      if (!product) throw new NotFoundError('Rental product not found');
+      const newTenureMonths = item.tenureMonths + additionalMonths;
+      const exactTier = product.tenureTiers.find(
+        (tier) => tier.tenureMonths === newTenureMonths
+      );
+      const applicableTier =
+        exactTier ||
+        product.tenureTiers
+          .filter((tier) => tier.tenureMonths >= newTenureMonths)
+          .sort((a, b) => a.tenureMonths - b.tenureMonths)[0];
+      const monthlyRentPaise = applicableTier?.monthlyRentPaise ?? item.monthlyRentPaise;
+      extensionAmountPaise += monthlyRentPaise * item.quantity * additionalMonths;
+      item.tenureMonths = newTenureMonths;
+      item.monthlyRentPaise = monthlyRentPaise;
+      item.lineTotalPaise = monthlyRentPaise * item.quantity * additionalMonths;
+    }
     const end = new Date(order.rentalEndAt);
     end.setMonth(end.getMonth() + additionalMonths);
     order.rentalEndAt = end;
+    order.nextDueAt = order.nextDueAt
+      ? new Date(order.nextDueAt)
+      : order.rentalStartAt
+        ? new Date(order.rentalStartAt)
+        : new Date();
+    if (extensionAmountPaise > 0) {
+      const dueAt = new Date(order.rentalStartAt || new Date());
+      dueAt.setMonth(dueAt.getMonth() + Math.max(1, additionalMonths));
+      const invoiceCount = await RentalInvoice.countDocuments({ orderId: order._id });
+      await RentalInvoice.create({
+        orderId: order._id,
+        renterId: order.renterId,
+        monthIndex: 1_000_000 + invoiceCount + 1,
+        dueAt,
+        amountPaise: extensionAmountPaise,
+        status: RENTAL_INVOICE_STATUSES.PENDING,
+      });
+    }
+    await order.save();
+    return formatOrder(order);
+  }
+
+  public async generateMonthlyInvoices(
+    userId: string,
+    orderId: string
+  ): Promise<ReturnType<typeof formatRentalInvoice>[]> {
+    const order = await Order.findById(orderId);
+    if (!order) throw new NotFoundError('Order not found');
+    if (order.renterId.toString() !== userId)
+      throw new ForbiddenError('You cannot generate invoices for this order');
+    if (order.status !== ORDER_STATES.ACTIVE)
+      throw new ValidationError('Invoices are available only for active rentals');
+    if (!order.rentalStartAt || !order.rentalEndAt)
+      throw new ValidationError('Rental dates are missing');
+
+    const invoices = [];
+    const currentMonth = new Date(order.rentalStartAt);
+    currentMonth.setMonth(currentMonth.getMonth() + 1);
+    const monthlyRentPaise = order.items.reduce(
+      (sum, item) => sum + item.monthlyRentPaise * item.quantity,
+      0
+    );
+    let monthIndex = 2;
+    while (currentMonth <= order.rentalEndAt) {
+      const dueAt = new Date(currentMonth);
+      const invoice = await RentalInvoice.findOneAndUpdate(
+        { orderId: order._id, monthIndex },
+        {
+          $setOnInsert: {
+            orderId: order._id,
+            renterId: order.renterId,
+            monthIndex,
+            dueAt,
+            amountPaise: monthlyRentPaise,
+            status:
+              dueAt < new Date()
+                ? RENTAL_INVOICE_STATUSES.OVERDUE
+                : RENTAL_INVOICE_STATUSES.PENDING,
+          },
+        },
+        { upsert: true, new: true }
+      );
+      invoices.push(formatRentalInvoice(invoice));
+      if (dueAt < new Date() && !order.overdueAt) order.overdueAt = dueAt;
+      currentMonth.setMonth(currentMonth.getMonth() + 1);
+      monthIndex += 1;
+    }
+    await order.save();
+    return invoices;
+  }
+
+  public generateRentalInvoices(
+    userId: string,
+    orderId: string
+  ): Promise<ReturnType<typeof formatRentalInvoice>[]> {
+    return this.generateMonthlyInvoices(userId, orderId);
+  }
+
+  public async listRentalInvoices(
+    userId: string,
+    orderId: string
+  ): Promise<ReturnType<typeof formatRentalInvoice>[]> {
+    const order = await Order.findById(orderId);
+    if (!order) throw new NotFoundError('Order not found');
+    if (order.renterId.toString() !== userId)
+      throw new ForbiddenError('You cannot view invoices for this order');
+    const invoices = await RentalInvoice.find({ orderId: order._id }).sort({ monthIndex: 1 });
+    return invoices.map(formatRentalInvoice);
+  }
+
+  public async markOverdueInvoices(): Promise<number> {
+    const result = await RentalInvoice.updateMany(
+      {
+        status: RENTAL_INVOICE_STATUSES.PENDING,
+        dueAt: { $lt: new Date() },
+      },
+      { $set: { status: RENTAL_INVOICE_STATUSES.OVERDUE } }
+    );
+    return result.modifiedCount;
+  }
+
+  public async startInvoicePayment(
+    userId: string,
+    orderId: string,
+    invoiceId: string
+  ): Promise<{ invoice: ReturnType<typeof formatRentalInvoice>; keyId: string }> {
+    const order = await Order.findById(orderId);
+    if (!order) throw new NotFoundError('Order not found');
+    if (order.renterId.toString() !== userId)
+      throw new ForbiddenError('You cannot pay this invoice');
+    if (!mongoose.isValidObjectId(invoiceId)) throw new ValidationError('Invalid invoice ID');
+    const invoice = await RentalInvoice.findOne({ _id: invoiceId, orderId: order._id });
+    if (!invoice) throw new NotFoundError('Invoice not found');
+    if (invoice.status === RENTAL_INVOICE_STATUSES.PAID)
+      throw new ConflictError('This invoice is already paid');
+    if (!invoice.razorpayOrderId) {
+      invoice.razorpayOrderId = await paymentGateway.createOrder(
+        invoice.amountPaise,
+        `rentease_invoice_${invoice._id}`
+      );
+      await invoice.save();
+    }
+    return { invoice: formatRentalInvoice(invoice), keyId: paymentGateway.keyId };
+  }
+
+  public async verifyInvoicePayment(
+    userId: string,
+    orderId: string,
+    invoiceId: string,
+    input: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }
+  ): Promise<ReturnType<typeof formatRentalInvoice>> {
+    const order = await Order.findById(orderId);
+    if (!order) throw new NotFoundError('Order not found');
+    if (order.renterId.toString() !== userId)
+      throw new ForbiddenError('You cannot verify this invoice');
+    const invoice = await RentalInvoice.findOne({ _id: invoiceId, orderId: order._id });
+    if (!invoice) throw new NotFoundError('Invoice not found');
+    if (invoice.razorpayOrderId !== input.razorpay_order_id)
+      throw new ValidationError('Razorpay order mismatch');
+    const valid = paymentGateway.verifyPaymentSignature({
+      razorpayOrderId: input.razorpay_order_id,
+      razorpayPaymentId: input.razorpay_payment_id,
+      signature: input.razorpay_signature,
+    });
+    if (!valid) throw new ValidationError('Invalid Razorpay payment signature');
+    invoice.status = RENTAL_INVOICE_STATUSES.PAID;
+    invoice.razorpayPaymentId = input.razorpay_payment_id;
+    invoice.paidAt = new Date();
+    await invoice.save();
+    await paymentLedgerService.recordRentPayment(
+      order,
+      invoice.amountPaise,
+      input.razorpay_payment_id,
+      `Rental invoice ${invoice.monthIndex} paid`
+    );
+    if (order.nextDueAt) {
+      const nextDue = new Date(order.nextDueAt);
+      nextDue.setMonth(nextDue.getMonth() + 1);
+      if (!order.rentalEndAt || nextDue <= order.rentalEndAt) order.nextDueAt = nextDue;
+    }
+    if (order.overdueAt) {
+      const remainingOverdue = await RentalInvoice.exists({
+        orderId: order._id,
+        status: RENTAL_INVOICE_STATUSES.OVERDUE,
+      });
+      if (!remainingOverdue) order.overdueAt = undefined;
+    }
+    await order.save();
+    return formatRentalInvoice(invoice);
+  }
+
+  public async sendInvoiceReminder(
+    userId: string,
+    orderId: string
+  ): Promise<{ sent: boolean }> {
+    const order = await Order.findById(orderId);
+    if (!order) throw new NotFoundError('Order not found');
+    if (order.renterId.toString() !== userId)
+      throw new ForbiddenError('You cannot request reminders for this order');
+    const renter = await User.findById(order.renterId);
+    if (renter) {
+      await emailService.sendMaintenanceUpdateEmail?.(
+        renter.email,
+        'Rental invoice reminder',
+        `Your RentEase invoice for order ${order.id} is due.`
+      );
+    }
+    return { sent: true };
+  }
+
+  public async updateMaintenanceStatus(
+    actorId: string,
+    orderId: string,
+    ticketId: string,
+    status: 'ASSIGNED' | 'IN_PROGRESS' | 'RESOLVED'
+  ): Promise<IOrder> {
+    const order = await Order.findById(orderId);
+    if (!order) throw new NotFoundError('Order not found');
+    const ticket = order.maintenanceRequests.find((entry) => entry._id.toString() === ticketId);
+    if (!ticket) throw new NotFoundError('Maintenance ticket not found');
+
+    const actor = await User.findById(actorId);
+    const profile = await VendorProfile.findOne({ userId: new mongoose.Types.ObjectId(actorId) });
+    const isAdmin = actor?.role === 'admin';
+    const ownsVendorTicket =
+      profile && order.items.some((item) => item.vendorId.toString() === profile._id.toString());
+    if (!isAdmin && !ownsVendorTicket)
+      throw new ForbiddenError('You cannot update this maintenance ticket');
+
+    const allowed: Record<typeof ticket.status, readonly typeof status[]> = {
+      OPEN: ['ASSIGNED'],
+      ASSIGNED: ['IN_PROGRESS'],
+      IN_PROGRESS: ['RESOLVED'],
+      RESOLVED: [],
+    };
+    if (!(allowed[ticket.status] as readonly typeof status[]).includes(status)) {
+      throw new ValidationError(`Invalid maintenance transition from ${ticket.status} to ${status}`);
+    }
+    ticket.status = status;
+    if (status === 'ASSIGNED') {
+      ticket.assignedVendorId = profile?._id;
+      ticket.assignedAt = new Date();
+    }
+    if (status === 'IN_PROGRESS') ticket.inProgressAt = new Date();
+    if (status === 'RESOLVED') {
+      ticket.resolvedAt = new Date();
+      const renter = await User.findById(order.renterId);
+      if (renter) {
+        await emailService.sendMaintenanceUpdateEmail?.(
+          renter.email,
+          'Maintenance request resolved',
+          `Your maintenance request ${ticketId.slice(-8)} is resolved.`
+        );
+      }
+    }
+    await order.save();
+    return formatOrder(order);
+  }
+
+  public async confirmMaintenance(
+    userId: string,
+    orderId: string,
+    ticketId: string
+  ): Promise<IOrder> {
+    const order = await Order.findById(orderId);
+    if (!order) throw new NotFoundError('Order not found');
+    if (order.renterId.toString() !== userId)
+      throw new ForbiddenError('You cannot confirm this ticket');
+    const ticket = order.maintenanceRequests.find((entry) => entry._id.toString() === ticketId);
+    if (!ticket) throw new NotFoundError('Maintenance ticket not found');
+    if (ticket.status !== 'RESOLVED')
+      throw new ValidationError('Only resolved maintenance tickets can be confirmed');
+    ticket.renterConfirmedAt = new Date();
     await order.save();
     return formatOrder(order);
   }
@@ -537,12 +829,39 @@ export class CheckoutService {
         createdAt: new Date(),
       };
     }
+    const settlement = calculateDepositSettlement(
+      order.securityDepositPaise,
+      order.damageClaim?.deductedPaise || 0
+    );
+    if (order.returnRequest) {
+      order.returnRequest.depositRefundPaise = settlement.refundPaise;
+      order.returnRequest.depositRefundStatus = 'PENDING';
+    }
     await order.save();
     for (const item of order.items) {
       if (item.vendorId.toString() === profile._id.toString()) {
         await Product.findByIdAndUpdate(item.productId, { $inc: { stockCount: item.quantity } });
       }
     }
+    return formatOrder(order);
+  }
+
+  public async disputeDamageClaim(
+    userId: string,
+    orderId: string,
+    reason: string
+  ): Promise<IOrder> {
+    const order = await Order.findById(orderId);
+    if (!order) throw new NotFoundError('Order not found');
+    if (order.renterId.toString() !== userId)
+      throw new ForbiddenError('You cannot dispute this damage claim');
+    if (!order.damageClaim)
+      throw new ValidationError('This order has no damage claim');
+    if (order.damageClaim.disputed)
+      throw new ConflictError('This damage claim is already disputed');
+    order.damageClaim.disputed = true;
+    order.damageClaim.arbitrationReason = reason;
+    await order.save();
     return formatOrder(order);
   }
 }

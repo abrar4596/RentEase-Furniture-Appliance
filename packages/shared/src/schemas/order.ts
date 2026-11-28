@@ -15,35 +15,12 @@ const kycDocumentSchema = z.object({
   url: z.string().url(),
 });
 
-/**
- * Per-document-type format rules (India-specific).
- * These patterns validate the structural shape only, not authentic UIDs.
- */
-const KYC_DOCUMENT_PATTERNS: Record<string, RegExp> = {
-  AADHAR: /^\d{12}$/,            // 12 digits
-  PAN: /^[A-Z]{5}\d{4}[A-Z]$/,  // AAAAA9999A
-  DL: /^[A-Z]{2}\d{2}\s?\d{11}$/, // State code + 13 digits
-  PASSPORT: /^[A-Z]\d{7}$/,      // Letter + 7 digits
-  VOTER_ID: /^[A-Z]{3}\d{7}$/,   // 3 letters + 7 digits
-};
-
-export const submitKycSchema = z
-  .object({
-    documentType: z.enum(['AADHAR', 'PAN', 'DL', 'PASSPORT', 'VOTER_ID']),
-    documentNumber: z.string().trim().min(4).max(30),
-    frontDocument: kycDocumentSchema,
-    backDocument: kycDocumentSchema.optional(),
-  })
-  .superRefine((val, ctx) => {
-    const pattern = KYC_DOCUMENT_PATTERNS[val.documentType];
-    if (pattern && !pattern.test(val.documentNumber.toUpperCase())) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['documentNumber'],
-        message: `Invalid ${val.documentType} number format`,
-      });
-    }
-  });
+export const submitKycSchema = z.object({
+  documentType: z.enum(['AADHAR', 'PAN', 'DL', 'PASSPORT', 'VOTER_ID']),
+  documentNumber: z.string().trim().min(4).max(30),
+  frontDocument: kycDocumentSchema,
+  backDocument: kycDocumentSchema.optional(),
+});
 
 export const reviewKycSchema = z
   .object({
@@ -57,14 +34,11 @@ export const reviewKycSchema = z
 
 export const updateOrderFulfillmentSchema = z.object({
   status: z.enum(['OUT_FOR_DELIVERY', 'ACTIVE']),
-  /** Optional Cloudinary proof-of-delivery photo. Only accepted when status is ACTIVE. */
-  deliveryPhoto: z
-    .object({ publicId: z.string().min(1), url: z.string().url() })
-    .optional(),
 });
 
 export const maintenanceRequestSchema = z.object({
   description: z.string().trim().min(10).max(1000),
+  category: z.enum(['GENERAL', 'ELECTRICAL', 'PLUMBING', 'FURNITURE', 'APPLIANCE']).default('GENERAL'),
   photos: z
     .array(
       z.object({
@@ -99,4 +73,12 @@ export const returnCompleteSchema = z.object({
     .optional()
     .default([]),
   damageDeductionPaise: z.number().int().min(0).optional().default(0),
+});
+
+export const maintenanceStatusSchema = z.object({
+  status: z.enum(['ASSIGNED', 'IN_PROGRESS', 'RESOLVED']),
+});
+
+export const damageDisputeSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
 });

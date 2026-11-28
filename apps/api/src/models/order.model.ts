@@ -31,19 +31,29 @@ export interface IOrderDocument extends Document<mongoose.Types.ObjectId> {
   deliveredAt?: Date;
   rentalStartAt?: Date;
   rentalEndAt?: Date;
+  reservedRefundPaise: number;
+  nextDueAt?: Date;
+  overdueAt?: Date;
   maintenanceRequests: Array<{
     _id: mongoose.Types.ObjectId;
     description: string;
     photos: Array<{ publicId: string; url: string }>;
-    status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED';
+    category: 'GENERAL' | 'ELECTRICAL' | 'PLUMBING' | 'FURNITURE' | 'APPLIANCE';
+    status: 'OPEN' | 'ASSIGNED' | 'IN_PROGRESS' | 'RESOLVED';
+    assignedVendorId?: mongoose.Types.ObjectId;
+    assignedAt?: Date;
+    inProgressAt?: Date;
     createdAt: Date;
     resolvedAt?: Date;
+    renterConfirmedAt?: Date;
   }>;
   returnRequest?: {
     requestedAt: Date;
     preferredPickupDate: string;
     reason?: string;
     returnedAt?: Date;
+    depositRefundPaise?: number;
+    depositRefundStatus?: 'PENDING' | 'PROCESSED';
   };
   damageClaim?: {
     description: string;
@@ -84,6 +94,8 @@ const returnRequestSchema = new Schema(
     preferredPickupDate: String,
     reason: String,
     returnedAt: Date,
+    depositRefundPaise: { type: Number, min: 0, default: 0 },
+    depositRefundStatus: { type: String, enum: ['PENDING', 'PROCESSED'], default: 'PENDING' },
   },
   { _id: false }
 );
@@ -150,14 +162,30 @@ const orderSchema = new Schema<IOrderDocument>(
     deliveredAt: Date,
     rentalStartAt: Date,
     rentalEndAt: Date,
+    reservedRefundPaise: { type: Number, min: 0, default: 0, select: true },
+    nextDueAt: Date,
+    overdueAt: Date,
     maintenanceRequests: {
       type: [
         {
           description: { type: String, required: true },
           photos: [{ publicId: String, url: String }],
-          status: { type: String, enum: ['OPEN', 'IN_PROGRESS', 'RESOLVED'], default: 'OPEN' },
+          category: {
+            type: String,
+            enum: ['GENERAL', 'ELECTRICAL', 'PLUMBING', 'FURNITURE', 'APPLIANCE'],
+            default: 'GENERAL',
+          },
+          status: {
+            type: String,
+            enum: ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'RESOLVED'],
+            default: 'OPEN',
+          },
+          assignedVendorId: { type: Schema.Types.ObjectId, ref: 'VendorProfile' },
+          assignedAt: Date,
+          inProgressAt: Date,
           createdAt: { type: Date, default: Date.now },
           resolvedAt: Date,
+          renterConfirmedAt: Date,
         },
       ],
       default: [],
@@ -214,13 +242,20 @@ export function formatOrder(doc: IOrderDocument): IOrder {
     deliveredAt: doc.deliveredAt?.toISOString(),
     rentalStartAt: doc.rentalStartAt?.toISOString(),
     rentalEndAt: doc.rentalEndAt?.toISOString(),
+    nextDueAt: doc.nextDueAt?.toISOString(),
+    overdueAt: doc.overdueAt?.toISOString(),
     maintenanceRequests: (doc.maintenanceRequests || []).map((ticket) => ({
       id: ticket._id.toString(),
       description: ticket.description,
       photos: ticket.photos,
+      category: ticket.category || 'GENERAL',
       status: ticket.status,
+      assignedVendorId: ticket.assignedVendorId?.toString(),
+      assignedAt: ticket.assignedAt?.toISOString(),
+      inProgressAt: ticket.inProgressAt?.toISOString(),
       createdAt: ticket.createdAt.toISOString(),
       resolvedAt: ticket.resolvedAt?.toISOString(),
+      renterConfirmedAt: ticket.renterConfirmedAt?.toISOString(),
     })),
     returnRequest: doc.returnRequest
       ? {
@@ -228,6 +263,8 @@ export function formatOrder(doc: IOrderDocument): IOrder {
           preferredPickupDate: doc.returnRequest.preferredPickupDate,
           reason: doc.returnRequest.reason,
           returnedAt: doc.returnRequest.returnedAt?.toISOString(),
+          depositRefundPaise: doc.returnRequest.depositRefundPaise,
+          depositRefundStatus: doc.returnRequest.depositRefundStatus,
         }
       : undefined,
     damageClaim: doc.damageClaim
@@ -245,6 +282,10 @@ export function formatOrder(doc: IOrderDocument): IOrder {
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };
+}
+
+export function formatOrderForVendor(doc: IOrderDocument): IOrder {
+  return { ...formatOrder(doc), kyc: undefined };
 }
 
 export const Order = mongoose.model<IOrderDocument>('Order', orderSchema);

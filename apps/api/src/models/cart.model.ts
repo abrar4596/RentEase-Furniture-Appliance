@@ -1,8 +1,10 @@
 import mongoose, { Schema, Document } from 'mongoose';
-import { DeliveryAddress } from '@rentease/shared';
+import { DeliveryAddress, DeliverySlot } from '@rentease/shared';
 
 export interface ICartItemDocument {
   productId: mongoose.Types.ObjectId;
+  vendorId: mongoose.Types.ObjectId;
+  vendorBusinessName?: string;
   tenureMonths: number;
   quantity: number;
   monthlyRentPaise: number;
@@ -14,21 +16,29 @@ export interface ICartItemDocument {
 
 export interface ICartDocument extends Document<mongoose.Types.ObjectId> {
   _id: mongoose.Types.ObjectId;
-  userId: mongoose.Types.ObjectId;
+  /** Set for authenticated renter carts. */
+  userId?: mongoose.Types.ObjectId;
+  /** Set for anonymous (device-cookie) guest carts. */
+  guestId?: string;
   items: ICartItemDocument[];
   deliveryAddress?: DeliveryAddress;
   preferredDeliveryDate?: string;
-  preferredDeliverySlot?: 'morning' | 'afternoon' | 'evening';
+  preferredDeliverySlot?: DeliverySlot;
+  /** TTL marker for guest carts so abandoned anonymous carts self-expire. */
+  guestExpiresAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
 
 const cartSchema = new Schema<ICartDocument>(
   {
-    userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, unique: true, index: true },
+    userId: { type: Schema.Types.ObjectId, ref: 'User' },
+    guestId: { type: String },
     items: [
       {
         productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
+        vendorId: { type: Schema.Types.ObjectId, ref: 'VendorProfile', required: true },
+        vendorBusinessName: String,
         tenureMonths: { type: Number, enum: [1, 3, 6, 12], required: true },
         quantity: { type: Number, required: true, min: 1 },
         monthlyRentPaise: { type: Number, required: true, min: 1 },
@@ -49,8 +59,16 @@ const cartSchema = new Schema<ICartDocument>(
     },
     preferredDeliveryDate: String,
     preferredDeliverySlot: { type: String, enum: ['morning', 'afternoon', 'evening'] },
+    guestExpiresAt: { type: Date },
   },
   { timestamps: true }
 );
+
+// A cart belongs to exactly one owner: a user OR a device (guest). Sparse unique
+// indexes keep both lookups collision-free while allowing the other key to be absent.
+cartSchema.index({ userId: 1 }, { unique: true, sparse: true });
+cartSchema.index({ guestId: 1 }, { unique: true, sparse: true });
+// Abandoned guest carts are purged automatically.
+cartSchema.index({ guestExpiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export const Cart = mongoose.model<ICartDocument>('Cart', cartSchema);

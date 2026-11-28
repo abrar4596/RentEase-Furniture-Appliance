@@ -12,6 +12,8 @@ import {
   returnRequestSchema,
   returnCompleteSchema,
   createRefundSchema,
+  maintenanceStatusSchema,
+  damageDisputeSchema,
 } from '@rentease/shared';
 import { validate } from '../middleware/validate.js';
 import { verifyPaymentSchema } from '@rentease/shared';
@@ -27,7 +29,6 @@ orderRouter.post(
 );
 orderRouter.get('/', authorize(USER_ROLES.RENTER), checkoutController.getOrders);
 orderRouter.get('/vendor/mine', authorize(USER_ROLES.VENDOR), checkoutController.getVendorOrders);
-orderRouter.get('/vendor/:id', authorize(USER_ROLES.VENDOR), checkoutController.getVendorOrder);
 orderRouter.patch(
   '/vendor/:id/status',
   authorize(USER_ROLES.VENDOR),
@@ -90,4 +91,42 @@ orderRouter.post(
   authorize(USER_ROLES.RENTER),
   validate({ body: returnRequestSchema }),
   checkoutController.requestReturn
+);
+orderRouter.get(
+  '/:id/invoices',
+  authorize(USER_ROLES.RENTER),
+  checkoutController.listInvoices
+);
+orderRouter.post(
+  '/:id/invoices/generate',
+  authorize(USER_ROLES.RENTER),
+  checkoutController.generateInvoices
+);
+orderRouter.post(
+  '/:id/invoices/:invoiceId/pay',
+  authorize(USER_ROLES.RENTER),
+  checkoutController.startInvoicePayment
+);
+orderRouter.post(
+  '/:id/invoices/:invoiceId/verify',
+  authorize(USER_ROLES.RENTER),
+  validate({ body: verifyPaymentSchema }),
+  checkoutController.verifyInvoicePayment
+);
+orderRouter.patch(
+  '/:id/maintenance/:ticketId/status',
+  authorize(USER_ROLES.VENDOR, USER_ROLES.ADMIN),
+  validate({ body: maintenanceStatusSchema }),
+  checkoutController.updateMaintenanceStatus
+);
+orderRouter.post(
+  '/:id/maintenance/:ticketId/confirm',
+  authorize(USER_ROLES.RENTER),
+  checkoutController.confirmMaintenance
+);
+orderRouter.post(
+  '/:id/damage/dispute',
+  authorize(USER_ROLES.RENTER),
+  validate({ body: damageDisputeSchema }),
+  checkoutController.disputeDamage
 );

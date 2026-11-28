@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { OAuth2Client } from 'google-auth-library';
 import mongoose from 'mongoose';
 import {
   RegisterInput,
@@ -295,17 +296,25 @@ export class AuthService {
     let googleId = '';
 
     try {
-      const decoded = jwt.decode(credential) as Record<string, unknown> | null;
-      if (decoded && typeof decoded.email === 'string') {
-        email = decoded.email.toLowerCase();
-        name = (decoded.name as string) || email.split('@')[0] || 'User';
-        googleId = (decoded.sub as string) || `google_${Date.now()}`;
-      } else if (env.NODE_ENV !== 'production' && credential.startsWith('test_google_')) {
+       if (env.NODE_ENV !== 'production' && credential.startsWith('test_google_')) {
         email = `${credential.toLowerCase()}@example.com`;
         name = 'Google Test User';
         googleId = credential;
       } else {
-        throw new UnauthorizedError('Invalid Google credential token.');
+         if (!env.GOOGLE_CLIENT_ID) {
+           throw new UnauthorizedError('Google OAuth is not configured.');
+         }
+         const ticket = await new OAuth2Client(env.GOOGLE_CLIENT_ID).verifyIdToken({
+           idToken: credential,
+           audience: env.GOOGLE_CLIENT_ID,
+         });
+         const payload = ticket.getPayload();
+         if (!payload?.email || !payload.sub) {
+           throw new UnauthorizedError('Invalid Google credential token.');
+         }
+         email = payload.email.toLowerCase();
+         name = payload.name || email.split('@')[0] || 'User';
+         googleId = payload.sub;
       }
     } catch {
       throw new UnauthorizedError('Failed to process Google authentication token.');

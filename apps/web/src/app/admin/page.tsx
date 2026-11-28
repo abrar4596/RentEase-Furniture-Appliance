@@ -9,6 +9,7 @@ import {
   IAdminOrderSearchResult,
   IAuditEvent,
   IPlatformSettings,
+  IAdminSupportTicket,
 } from '@rentease/shared';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
@@ -26,6 +27,7 @@ function AdminConsole() {
   const [metrics, setMetrics] = useState<IAdminMetrics | null>(null);
   const [orders, setOrders] = useState<IAdminOrderSearchResult[]>([]);
   const [audit, setAudit] = useState<IAuditEvent[]>([]);
+  const [supportTickets, setSupportTickets] = useState<IAdminSupportTicket[]>([]);
   const [settings, setSettings] = useState<IPlatformSettings | null>(null);
   const [orderId, setOrderId] = useState('');
   const [status, setStatus] = useState('');
@@ -39,21 +41,24 @@ function AdminConsole() {
   const load = useCallback(async () => {
     if (!accessToken) return;
     const headers = { Authorization: `Bearer ${accessToken}` };
-    const [metricsRes, auditRes, settingsRes, citiesRes] = await Promise.all([
+    const [metricsRes, auditRes, settingsRes, citiesRes, supportRes] = await Promise.all([
       fetch(`${API_BASE}/admin/metrics`, { headers }),
       fetch(`${API_BASE}/admin/audit`, { headers }),
       fetch(`${API_BASE}/admin/settings`, { headers }),
       fetch(`${API_BASE}/admin/cities`, { headers }),
+      fetch(`${API_BASE}/admin/support/tickets`, { headers }),
     ]);
-    const [metricsData, auditData, settingsData, citiesData] = await Promise.all([
+    const [metricsData, auditData, settingsData, citiesData, supportData] = await Promise.all([
       metricsRes.json(),
       auditRes.json(),
       settingsRes.json(),
       citiesRes.json(),
+      supportRes.json(),
     ]);
     if (metricsData.success) setMetrics(metricsData.data.metrics);
     if (auditData.success) setAudit(auditData.data.events);
     if (settingsData.success) setSettings(settingsData.data.settings);
+    if (supportData.success) setSupportTickets(supportData.data.tickets);
     if (citiesData.success)
       setCities(
         citiesData.data.cities.map(
@@ -150,29 +155,6 @@ function AdminConsole() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
       <h1 className="mb-6 text-2xl font-bold">Operations Console</h1>
-
-      {/* Quick navigation */}
-      <div className="mb-6 flex flex-wrap gap-3">
-        <a
-          href="/admin/kyc"
-          className="inline-flex items-center rounded-lg border border-emerald-600 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
-        >
-          KYC Review Queue
-        </a>
-        <a
-          href="/admin/vendors"
-          className="inline-flex items-center rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-        >
-          Vendor Management
-        </a>
-        <a
-          href="/admin/payouts"
-          className="inline-flex items-center rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-        >
-          Payouts
-        </a>
-      </div>
-
       {metrics && (
         <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
           {[
@@ -262,6 +244,11 @@ function AdminConsole() {
                     </Button>
                   </div>
                 )}
+                {order.auditTrail && order.auditTrail.length > 0 && (
+                  <div className="w-full text-xs text-gray-500">
+                    Latest audit: {order.auditTrail[0]?.action}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -298,6 +285,31 @@ function AdminConsole() {
               </div>
             ))}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mb-8">
+        <CardContent className="p-5">
+          <h2 className="mb-4 font-semibold">Support and dispute queue</h2>
+          {supportTickets.length === 0 ? (
+            <p className="text-sm text-gray-500">No open support or dispute items.</p>
+          ) : (
+            <div className="space-y-2">
+              {supportTickets.slice(0, 25).map((ticket) => (
+                <div
+                  key={ticket.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded border p-3 text-sm"
+                >
+                  <div>
+                    <strong>{ticket.type}</strong> · {ticket.subject} · order #
+                    {ticket.orderId.slice(-8)}
+                    <p className="mt-1 text-xs text-gray-600">{ticket.description}</p>
+                  </div>
+                  <span className="text-xs font-semibold text-amber-700">{ticket.status}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import request from 'supertest';
 import mongoose from 'mongoose';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { getTestMongoUri } from './global-setup.js';
 import { USER_ROLES } from '@rentease/shared';
 import { createApp } from '../src/app.js';
 import { User } from '../src/models/user.model.js';
@@ -11,23 +11,33 @@ import { authService } from '../src/services/auth.service.js';
 import { emailService, MockEmailService } from '../src/services/email.service.js';
 
 describe('Phase 1: Authentication & RBAC Integration Tests', () => {
-  let mongoServer: MongoMemoryServer;
   const app = createApp();
 
   beforeAll(async () => {
-    mongoServer = await MongoMemoryServer.create();
-    await mongoose.connect(mongoServer.getUri());
+    await mongoose.connect(getTestMongoUri());
   });
 
   afterAll(async () => {
     await mongoose.disconnect();
-    await mongoServer.stop();
   });
 
   beforeEach(async () => {
     await User.deleteMany({});
     await RefreshToken.deleteMany({});
     await PasswordResetToken.deleteMany({});
+  });
+
+  it('accepts only test Google credentials outside verified production mode', async () => {
+    const response = await request(app).post('/api/v1/auth/google').send({
+      credential: 'test_google_phase10',
+    });
+    expect(response.status).toBe(200);
+    expect(response.body.data.user.email).toBe('test_google_phase10@example.com');
+
+    const forged = await request(app).post('/api/v1/auth/google').send({
+      credential: 'eyJhbGciOiJub25lIn0.eyJlbWFpbCI6ImFkbWluQHJlbnRlYXNlLnRlc3QifQ.',
+    });
+    expect(forged.status).toBe(401);
   });
 
   describe('User Registration', () => {

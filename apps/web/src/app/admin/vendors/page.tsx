@@ -135,6 +135,9 @@ function AdminVendorsContent() {
   const rejectedCount = vendors.filter(
     (v) => v.verificationStatus === VENDOR_STATUSES.REJECTED
   ).length;
+  const suspendedCount = vendors.filter(
+    (v) => v.verificationStatus === VENDOR_STATUSES.SUSPENDED
+  ).length;
 
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 space-y-8">
@@ -154,7 +157,7 @@ function AdminVendorsContent() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="p-4 border-amber-200 bg-amber-50/50">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-amber-800">
@@ -183,6 +186,15 @@ function AdminVendorsContent() {
             <XCircle className="h-4 w-4 text-rose-600" />
           </div>
           <p className="text-2xl font-bold text-rose-700 mt-2">{rejectedCount}</p>
+        </Card>
+        <Card className="p-4 border-gray-200">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-gray-700">
+              Suspended
+            </span>
+            <AlertTriangle className="h-4 w-4 text-gray-600" />
+          </div>
+          <p className="text-2xl font-bold text-gray-800 mt-2">{suspendedCount}</p>
         </Card>
       </div>
 
@@ -218,6 +230,7 @@ function AdminVendorsContent() {
                   VENDOR_STATUSES.PENDING,
                   VENDOR_STATUSES.APPROVED,
                   VENDOR_STATUSES.REJECTED,
+                  VENDOR_STATUSES.SUSPENDED,
                 ].map((st) => (
                   <button
                     key={st}
@@ -362,6 +375,24 @@ function AdminVendorsContent() {
                             >
                               <XCircle className="h-3.5 w-3.5 mr-1" />
                               Reject
+                            </Button>
+                          )}
+                          {vendor.verificationStatus !== VENDOR_STATUSES.SUSPENDED && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                handleVerify(
+                                  vendor,
+                                  VENDOR_STATUSES.SUSPENDED,
+                                  'Suspended by platform administration'
+                                )
+                              }
+                              isLoading={isProcessing}
+                              className="text-xs text-gray-700 border-gray-300 hover:bg-gray-100"
+                            >
+                              <AlertTriangle className="h-3.5 w-3.5 mr-1" />
+                              Suspend
                             </Button>
                           )}
                         </div>

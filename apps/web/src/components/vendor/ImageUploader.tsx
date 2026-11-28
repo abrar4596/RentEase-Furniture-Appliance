@@ -8,6 +8,9 @@ import { useToast } from '../ui/Toast';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
 
+// Mock/demo affordances (fake Cloudinary responses, sample photos) must never run in production.
+const isDev = process.env.NODE_ENV !== 'production';
+
 interface ImageUploaderProps {
   images: ProductImage[];
   onChange: (images: ProductImage[]) => void;
@@ -91,12 +94,19 @@ export function ImageUploader({
 
       onChange([...images, newImage]);
       toastSuccess('Image uploaded successfully');
-    } catch {
-      // In development or test if Cloudinary credentials are mock:
-      const fallbackPublicId = `mock_img_${Date.now()}`;
-      const fallbackUrl = `https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=600&q=80`;
-      onChange([...images, { publicId: fallbackPublicId, url: fallbackUrl }]);
-      toastSuccess('Sample product photo added (development mock mode)');
+    } catch (err: unknown) {
+      if (isDev) {
+        // Local development may run without Cloudinary credentials: fall back to a sample photo.
+        const fallbackPublicId = `mock_img_${Date.now()}`;
+        const fallbackUrl = `https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=600&q=80`;
+        onChange([...images, { publicId: fallbackPublicId, url: fallbackUrl }]);
+        toastSuccess('Sample product photo added (development mock mode)');
+      } else {
+        toastError(
+          err instanceof Error ? err.message : 'Image upload failed. Please try again.',
+          'Upload failed'
+        );
+      }
     } finally {
       setIsUploading(false);
       e.target.value = '';
@@ -173,7 +183,7 @@ export function ImageUploader({
         )}
       </div>
 
-      {images.length === 0 && (
+      {isDev && images.length === 0 && (
         <div className="flex items-center gap-2 pt-1">
           <button
             type="button"

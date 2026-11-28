@@ -24,6 +24,16 @@ This document tracks features that are intentionally deferred or marked out-of-s
 
 ---
 
+## Deferred Within the Build Plan
+
+1. **Automatic Refund on KYC Rejection**
+   - _Phase:_ Deferred from Phase 5 to Phase 6 (order lifecycle completion)
+   - _Status:_ Deferred
+   - _Current Behaviour:_ A rejected KYC moves the order to `KYC_REJECTED`; the captured upfront rent + security deposit are **not** auto-refunded. An Admin issues the refund explicitly via `POST /api/v1/orders/admin/:id/refund`, which flows through the same verified refund service and append-only payment ledger.
+   - _Future Design:_ Wire the KYC rejection transition to `refundService.settleFullRefund` once the Phase 6 lifecycle rules (delivery-slot release, notification stub) are in place.
+
+---
+
 ## Explicitly Out of Scope (Do Not Build in v1)
 
 1. **Native iOS & Android Mobile Apps:** Replaced by responsive, mobile-first web app (Next.js App Router + Tailwind).

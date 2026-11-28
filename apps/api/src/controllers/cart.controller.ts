@@ -1,16 +1,16 @@
 import { Request, Response, NextFunction } from 'express';
-import { cartService } from '../services/cart.service.js';
+import { cartService, CartOwner } from '../services/cart.service.js';
 import { UnauthorizedError } from '../middleware/error-handler.js';
 
 export class CartController {
-  private requireUser(req: Request): string {
-    if (!req.user) throw new UnauthorizedError('Authentication required');
-    return req.user._id.toString();
+  private owner(req: Request): CartOwner {
+    if (!req.cartOwner) throw new UnauthorizedError('Cart session unavailable');
+    return req.cartOwner;
   }
 
   public getCart = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const cart = await cartService.getCart(this.requireUser(req));
+      const cart = await cartService.getCart(this.owner(req));
       res.json({ success: true, data: { cart } });
     } catch (error) {
       next(error);
@@ -18,7 +18,7 @@ export class CartController {
   };
   public addItem = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const cart = await cartService.addItem(this.requireUser(req), req.body);
+      const cart = await cartService.addItem(this.owner(req), req.body);
       res.status(200).json({ success: true, data: { cart } });
     } catch (error) {
       next(error);
@@ -27,7 +27,7 @@ export class CartController {
   public updateItem = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const cart = await cartService.updateItem(
-        this.requireUser(req),
+        this.owner(req),
         req.params.productId as string,
         req.body
       );
@@ -38,10 +38,7 @@ export class CartController {
   };
   public removeItem = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const cart = await cartService.removeItem(
-        this.requireUser(req),
-        req.params.productId as string
-      );
+      const cart = await cartService.removeItem(this.owner(req), req.params.productId as string);
       res.json({ success: true, data: { cart } });
     } catch (error) {
       next(error);
@@ -49,16 +46,32 @@ export class CartController {
   };
   public setDelivery = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const cart = await cartService.setDelivery(this.requireUser(req), req.body);
+      const cart = await cartService.setDelivery(this.owner(req), req.body);
       res.json({ success: true, data: { cart } });
+    } catch (error) {
+      next(error);
+    }
+  };
+  public getDeliverySlots = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const slots = await cartService.getDeliverySlots(
+        this.owner(req),
+        req.query.pincode as string,
+        req.query.date as string
+      );
+      res.json({ success: true, data: { slots } });
     } catch (error) {
       next(error);
     }
   };
   public clearCart = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      await cartService.clearCart(this.requireUser(req));
-      res.json({ success: true, data: { cart: await cartService.getCart(this.requireUser(req)) } });
+      await cartService.clearCart(this.owner(req));
+      res.json({ success: true, data: { cart: await cartService.getCart(this.owner(req)) } });
     } catch (error) {
       next(error);
     }

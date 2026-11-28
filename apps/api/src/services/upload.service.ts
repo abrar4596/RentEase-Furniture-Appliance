@@ -78,30 +78,6 @@ export class UploadService {
       tags,
     };
   }
-  /**
-   * Generates a short-lived authenticated URL for viewing a private KYC document
-   * stored in Cloudinary authenticated delivery mode.
-   *
-   * The URL expires in `expiresInSeconds` (default 300s / 5 min). Only call this
-   * for admin or vendor-review flows — never expose to arbitrary clients.
-   */
-  public generateKycViewUrl(publicId: string, expiresInSeconds = 300): string {
-    const expiresAt = Math.round(Date.now() / 1000) + expiresInSeconds;
-
-    if (env.NODE_ENV === 'test' || env.CLOUDINARY_API_SECRET === 'test_api_secret_abcdefghijk') {
-      // Return a stable stub URL in test/dev so tests don't need real Cloudinary.
-      return `https://res.cloudinary.com/${env.CLOUDINARY_CLOUD_NAME}/image/authenticated/s--stub--/e_expires_${expiresAt}/${publicId}`;
-    }
-
-    // Build a signed authenticated delivery URL via the Cloudinary SDK.
-    return cloudinary.url(publicId, {
-      type: 'authenticated',
-      sign_url: true,
-      auth_token: { duration: expiresInSeconds },
-      resource_type: 'image',
-      expires_at: expiresAt,
-    });
-  }
 }
 
 export const uploadService = new UploadService();

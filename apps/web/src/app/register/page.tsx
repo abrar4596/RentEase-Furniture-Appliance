@@ -14,7 +14,7 @@ import {
   CardFooter,
   useToast,
 } from '../../components/ui';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth, getRoleRedirectPath } from '../../context/AuthContext';
 import { Lock, Mail, User as UserIcon, Phone, Store, UserCheck } from 'lucide-react';
 import { USER_ROLES, UserRole } from '@rentease/shared';
 
@@ -37,7 +37,7 @@ export default function RegisterPage() {
     setIsLoading(true);
 
     try {
-      await register({
+      const createdUser = await register({
         name,
         email,
         phone: phone || undefined,
@@ -51,7 +51,7 @@ export default function RegisterPage() {
           : 'Account created successfully!',
         'Welcome to RentEase'
       );
-      router.push('/');
+      router.push(getRoleRedirectPath(createdUser.role));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Registration failed';
       setErrorMsg(message);

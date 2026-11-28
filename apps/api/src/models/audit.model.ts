@@ -4,7 +4,7 @@ import { IAuditEvent } from '@rentease/shared';
 export interface IAuditDocument extends Document<mongoose.Types.ObjectId> {
   actorId: mongoose.Types.ObjectId;
   action: string;
-  entityType: 'vendor' | 'kyc' | 'order' | 'city' | 'settings';
+  entityType: 'vendor' | 'kyc' | 'order' | 'city' | 'settings' | 'payout' | 'support';
   entityId: string;
   reason?: string;
   metadata?: Record<string, unknown>;
@@ -18,7 +18,7 @@ const auditSchema = new Schema<IAuditDocument>(
     action: { type: String, required: true, index: true },
     entityType: {
       type: String,
-      enum: ['vendor', 'kyc', 'order', 'city', 'settings'],
+      enum: ['vendor', 'kyc', 'order', 'city', 'settings', 'payout', 'support'],
       required: true,
       index: true,
     },

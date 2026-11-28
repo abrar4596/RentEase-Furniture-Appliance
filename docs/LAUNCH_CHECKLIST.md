@@ -5,6 +5,9 @@
 - [ ] Set production secrets in the hosting provider; never commit `.env`.
 - [ ] Configure MongoDB Atlas backups, IP allowlist, and least-privilege database users.
 - [ ] Set `NODE_ENV=production`, production CORS origin, JWT secrets, and secure cookie domain.
+- [ ] Set `GOOGLE_CLIENT_ID` and verify Google ID tokens against the configured audience.
+- [ ] Confirm refresh/logout requests are same-site or origin-validated; never enable cross-site cookie auth without CSRF controls.
+- [ ] Confirm vendor API responses omit private KYC document URLs.
 - [ ] Configure Razorpay live keys and webhook secret; register only `/api/v1/payments/webhook`.
 - [ ] Configure Cloudinary signed uploads and authenticated/private KYC delivery.
 - [ ] Verify KYC documents are masked in API responses and retained according to the PII retention policy.
@@ -14,6 +17,7 @@
 ## Release
 
 - [ ] Run formatting, lint, type-check, tests, and builds in CI.
+- [ ] Run `npm audit --omit=dev`; document and resolve production findings before release.
 - [ ] Run the three critical journeys against a staging environment.
 - [ ] Verify health endpoint and process restart behavior.
 - [ ] Confirm expired reservation reconciliation logs and stock restoration.

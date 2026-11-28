@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import mongoose from 'mongoose';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { getTestMongoUri } from './global-setup.js';
 import bcrypt from 'bcryptjs';
 import { createApp } from '../src/app.js';
 import { User } from '../src/models/user.model.js';
@@ -14,19 +14,18 @@ import { WebhookEvent } from '../src/models/webhook-event.model.js';
 import { InventoryLock } from '../src/models/inventory-lock.model.js';
 import { Product } from '../src/models/product.model.js';
 import { checkoutService } from '../src/services/checkout.service.js';
+import { VendorProfile } from '../src/models/vendor.model.js';
+import { City } from '../src/models/city.model.js';
 
 describe('Phase 9: Admin Console Integration Tests', () => {
-  let mongoServer: MongoMemoryServer;
   const app = createApp();
 
   beforeAll(async () => {
-    mongoServer = await MongoMemoryServer.create();
-    await mongoose.connect(mongoServer.getUri());
+    await mongoose.connect(getTestMongoUri());
   });
 
   afterAll(async () => {
     await mongoose.disconnect();
-    await mongoServer.stop();
   });
 
   beforeEach(async () => {
@@ -38,6 +37,8 @@ describe('Phase 9: Admin Console Integration Tests', () => {
       WebhookEvent.deleteMany({}),
       InventoryLock.deleteMany({}),
       Product.deleteMany({}),
+      VendorProfile.deleteMany({}),
+      City.deleteMany({}),
     ]);
   });
 
@@ -161,6 +162,116 @@ describe('Phase 9: Admin Console Integration Tests', () => {
 
     expect(await checkoutService.reconcileExpiredLocks()).toBe(1);
     expect((await Product.findById(product._id))?.stockCount).toBe(1);
+  });
+
+  it('supports vendor suspension and consolidates support disputes', async () => {
+    const passwordHash = await bcrypt.hash('Password@123', 12);
+    const [admin, vendorUser, renter] = await Promise.all([
+      User.create({
+        email: 'phase9-admin@rentease.test',
+        name: 'Admin',
+        role: 'admin',
+        status: 'active',
+        passwordHash,
+        authProviders: [{ provider: 'local', providerId: 'phase9-admin@rentease.test' }],
+      }),
+      User.create({
+        email: 'phase9-vendor@rentease.test',
+        name: 'Vendor',
+        role: 'vendor',
+        status: 'active',
+        passwordHash,
+        authProviders: [{ provider: 'local', providerId: 'phase9-vendor@rentease.test' }],
+      }),
+      User.create({
+        email: 'phase9-renter@rentease.test',
+        name: 'Renter',
+        role: 'renter',
+        status: 'active',
+        passwordHash,
+        authProviders: [{ provider: 'local', providerId: 'phase9-renter@rentease.test' }],
+      }),
+    ]);
+    const city = await City.create({
+      name: 'Jaipur',
+      state: 'Rajasthan',
+      pincodes: ['302001'],
+      isActive: true,
+    });
+    const vendor = await VendorProfile.create({
+      userId: vendorUser._id,
+      businessName: 'Phase 9 Furnishings',
+      contactPhone: '9876543210',
+      cityId: city._id,
+      servicePincodes: ['302001'],
+      verificationStatus: 'APPROVED',
+    });
+    await Order.create({
+      renterId: renter._id,
+      items: [
+        {
+          productId: new mongoose.Types.ObjectId(),
+          title: 'Test Sofa',
+          vendorId: vendor._id,
+          tenureMonths: 3,
+          quantity: 1,
+          monthlyRentPaise: 5000,
+          securityDepositPaise: 10000,
+          lineTotalPaise: 25000,
+        },
+      ],
+      deliveryAddress: {
+        fullName: 'Phase 9 Renter',
+        phone: '9876543210',
+        line1: 'Test',
+        city: 'Jaipur',
+        state: 'Rajasthan',
+        pincode: '302001',
+      },
+      preferredDeliveryDate: '2099-01-01',
+      preferredDeliverySlot: 'morning',
+      subtotalRentPaise: 5000,
+      securityDepositPaise: 10000,
+      totalUpfrontPaise: 15000,
+      status: 'RETURNED',
+      maintenanceRequests: [
+        {
+          description: 'The sofa frame needs a repair',
+          category: 'FURNITURE',
+          photos: [],
+          status: 'OPEN',
+          createdAt: new Date(),
+        },
+      ],
+      damageClaim: {
+        description: 'Fabric damage',
+        photos: [],
+        deductedPaise: 5000,
+        createdAt: new Date(),
+        disputed: true,
+      },
+    });
+
+    const login = await request(app).post('/api/v1/auth/login').send({
+      email: admin.email,
+      password: 'Password@123',
+    });
+    const headers = { Authorization: `Bearer ${login.body.data.accessToken}` };
+
+    const suspend = await request(app)
+      .patch(`/api/v1/vendors/admin/${vendor.id}/verify`)
+      .set(headers)
+      .send({ status: 'SUSPENDED' });
+    expect(suspend.status).toBe(200);
+    expect(suspend.body.data.profile.verificationStatus).toBe('SUSPENDED');
+
+    const tickets = await request(app)
+      .get('/api/v1/admin/support/tickets')
+      .set(headers);
+    expect(tickets.status).toBe(200);
+    expect(tickets.body.data.tickets).toHaveLength(2);
+    expect(tickets.body.data.tickets.some((ticket: { type: string }) => ticket.type === 'MAINTENANCE')).toBe(true);
+    expect(tickets.body.data.tickets.some((ticket: { type: string; disputed?: boolean }) => ticket.type === 'DAMAGE' && ticket.disputed)).toBe(true);
   });
 
   it('rejects invalid webhook signatures and ignores duplicate events', async () => {

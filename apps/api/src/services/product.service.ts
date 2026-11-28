@@ -3,28 +3,56 @@ import {
   CreateProductInput,
   UpdateProductInput,
   IProduct,
+  IPublicProduct,
   PRODUCT_STATUSES,
+  PRODUCT_AVAILABILITIES,
   VENDOR_STATUSES,
+  LIMITED_STOCK_THRESHOLD,
+  CATALOG_SORTS,
+  CatalogSort,
+  ProductAvailability,
   ProductStatus,
   ProductCategory,
 } from '@rentease/shared';
-import { Product, formatProduct } from '../models/product.model.js';
+import { Product, formatProduct, toPublicProduct } from '../models/product.model.js';
 import { VendorProfile } from '../models/vendor.model.js';
 import { City } from '../models/city.model.js';
 import { NotFoundError, ForbiddenError, ValidationError } from '../middleware/error-handler.js';
 
+export interface CatalogFilters {
+  cityId?: string;
+  pincode?: string;
+  category?: ProductCategory;
+  subcategory?: string;
+  search?: string;
+  minPricePaise?: number;
+  maxPricePaise?: number;
+  zeroDepositOnly?: boolean;
+  availability?: ProductAvailability;
+  sort?: CatalogSort;
+  inStock?: boolean;
+  page?: number;
+  limit?: number;
+}
+
+function buildCatalogSort(sort?: CatalogSort): Record<string, 1 | -1> {
+  switch (sort) {
+    case CATALOG_SORTS.PRICE_ASC:
+      return { startingRentPaise: 1, _id: 1 };
+    case CATALOG_SORTS.PRICE_DESC:
+      return { startingRentPaise: -1, _id: 1 };
+    case CATALOG_SORTS.FASTEST_DELIVERY:
+      return { deliveryLeadTimeHours: 1, _id: 1 };
+    case CATALOG_SORTS.NEWEST:
+      return { createdAt: -1, _id: 1 };
+    default:
+      return { updatedAt: -1, _id: 1 };
+  }
+}
+
 export class ProductService {
-  public async listCatalog(filters: {
-    cityId?: string;
-    pincode?: string;
-    category?: ProductCategory;
-    subcategory?: string;
-    search?: string;
-    inStock?: boolean;
-    page?: number;
-    limit?: number;
-  }): Promise<{
-    products: IProduct[];
+  public async listCatalog(filters: CatalogFilters): Promise<{
+    products: IPublicProduct[];
     pagination: { page: number; limit: number; total: number; totalPages: number };
   }> {
     const query: Record<string, unknown> = { status: PRODUCT_STATUSES.ACTIVE };
@@ -35,9 +63,31 @@ export class ProductService {
     if (filters.subcategory) {
       query.subcategory = filters.subcategory;
     }
-    if (filters.inStock !== false) {
+
+    // Availability is expressed only as a coarse bucket; raw stock counts never
+    // leave the server. An explicit availability filter overrides the default
+    // "hide sold-out listings" behaviour.
+    if (filters.availability === PRODUCT_AVAILABILITIES.UNAVAILABLE) {
+      query.stockCount = { $lte: 0 };
+    } else if (filters.availability === PRODUCT_AVAILABILITIES.LIMITED) {
+      query.stockCount = { $gt: 0, $lte: LIMITED_STOCK_THRESHOLD };
+    } else if (filters.availability === PRODUCT_AVAILABILITIES.IN_STOCK) {
+      query.stockCount = { $gt: LIMITED_STOCK_THRESHOLD };
+    } else if (filters.inStock !== false) {
       query.stockCount = { $gt: 0 };
     }
+
+    if (filters.minPricePaise !== undefined || filters.maxPricePaise !== undefined) {
+      const priceRange: Record<string, number> = {};
+      if (filters.minPricePaise !== undefined) priceRange.$gte = filters.minPricePaise;
+      if (filters.maxPricePaise !== undefined) priceRange.$lte = filters.maxPricePaise;
+      query.startingRentPaise = priceRange;
+    }
+
+    if (filters.zeroDepositOnly) {
+      query.securityDepositPaise = 0;
+    }
+
     if (filters.cityId) {
       query.cityId = new mongoose.Types.ObjectId(filters.cityId);
     } else if (filters.pincode) {
@@ -76,7 +126,7 @@ export class ProductService {
     const limit = Math.min(100, Math.max(1, filters.limit ?? 20));
     const [products, total] = await Promise.all([
       Product.find(query)
-        .sort({ updatedAt: -1 })
+        .sort(buildCatalogSort(filters.sort))
         .skip((page - 1) * limit)
         .limit(limit),
       Product.countDocuments(query),
@@ -95,10 +145,12 @@ export class ProductService {
 
     return {
       products: products.map((product) =>
-        formatProduct(
-          product,
-          vendorNames.get(product.vendorId.toString()),
-          cityNames.get(product.cityId.toString())
+        toPublicProduct(
+          formatProduct(
+            product,
+            vendorNames.get(product.vendorId.toString()),
+            cityNames.get(product.cityId.toString())
+          )
         )
       ),
       pagination: {
@@ -296,7 +348,7 @@ export class ProductService {
     return products.map((p) => formatProduct(p, vendor.businessName, city?.name));
   }
 
-  public async getProductById(productId: string): Promise<IProduct> {
+  public async getProductById(productId: string): Promise<IPublicProduct> {
     const product = await Product.findById(productId);
     if (!product) {
       throw new NotFoundError('Product not found');
@@ -308,7 +360,7 @@ export class ProductService {
     const vendor = await VendorProfile.findById(product.vendorId);
     const city = await City.findById(product.cityId);
 
-    return formatProduct(product, vendor?.businessName, city?.name);
+    return toPublicProduct(formatProduct(product, vendor?.businessName, city?.name));
   }
 }
 

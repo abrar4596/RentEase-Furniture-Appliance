@@ -1,10 +1,12 @@
 import mongoose, { Document, Schema } from 'mongoose';
-import { IPlatformSettings } from '@rentease/shared';
+import { DEFAULT_SLOT_CAPACITY, IPlatformSettings } from '@rentease/shared';
 
 export interface IPlatformSettingsDocument extends Document<mongoose.Types.ObjectId> {
   platformCommissionPercent: number;
   kycWindowHours: number;
   reservationTtlMinutes: number;
+  deliverySlotCapacity: number;
+  blackoutDates: string[];
   updatedAt: Date;
   createdAt: Date;
 }
@@ -14,6 +16,13 @@ const settingsSchema = new Schema<IPlatformSettingsDocument>(
     platformCommissionPercent: { type: Number, min: 0, max: 100, default: 15 },
     kycWindowHours: { type: Number, min: 1, max: 168, default: 24 },
     reservationTtlMinutes: { type: Number, min: 5, max: 60, default: 15 },
+    deliverySlotCapacity: {
+      type: Number,
+      min: 1,
+      max: 100,
+      default: DEFAULT_SLOT_CAPACITY,
+    },
+    blackoutDates: { type: [String], default: [] },
   },
   { timestamps: true }
 );
@@ -24,6 +33,8 @@ export function formatPlatformSettings(doc: IPlatformSettingsDocument): IPlatfor
     platformCommissionPercent: doc.platformCommissionPercent,
     kycWindowHours: doc.kycWindowHours,
     reservationTtlMinutes: doc.reservationTtlMinutes,
+    deliverySlotCapacity: doc.deliverySlotCapacity ?? DEFAULT_SLOT_CAPACITY,
+    blackoutDates: doc.blackoutDates ?? [],
     updatedAt: doc.updatedAt.toISOString(),
   };
 }

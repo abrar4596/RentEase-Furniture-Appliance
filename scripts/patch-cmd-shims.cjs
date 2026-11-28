@@ -22,7 +22,25 @@ function patchDirectory(dir) {
   }
 }
 
-const rootBin = path.join(__dirname, '..', 'node_modules', '.bin');
-patchDirectory(rootBin);
+const projectRoot = path.join(__dirname, '..');
+
+/** Every `node_modules/.bin` directory that npm may create in this monorepo. */
+function collectBinDirs() {
+  const bins = [path.join(projectRoot, 'node_modules', '.bin')];
+  for (const group of ['apps', 'packages']) {
+    const groupDir = path.join(projectRoot, group);
+    if (!fs.existsSync(groupDir)) continue;
+    for (const entry of fs.readdirSync(groupDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        bins.push(path.join(groupDir, entry.name, 'node_modules', '.bin'));
+      }
+    }
+  }
+  return bins;
+}
+
+for (const bin of collectBinDirs()) {
+  patchDirectory(bin);
+}
 // eslint-disable-next-line no-console
 console.log('✔ Windows cmd-shims patched for paths containing special characters.');

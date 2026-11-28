@@ -1,31 +1,27 @@
 import { Request, Response, NextFunction } from 'express';
 import { productService } from '../services/product.service.js';
 import { UnauthorizedError } from '../middleware/error-handler.js';
-import { ProductStatus, ProductCategory } from '@rentease/shared';
+import { ProductStatus, ProductCategory, CatalogQueryInput } from '@rentease/shared';
 
 export class ProductController {
   public async listCatalog(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const page = req.query.page ? Number(req.query.page) : 1;
-      const limit = req.query.limit ? Number(req.query.limit) : 20;
-      const inStock = req.query.inStock === 'false' ? false : true;
+      // Query has already been parsed & coerced by catalogQuerySchema at the route level.
+      const filters = req.query as unknown as CatalogQueryInput;
       const result = await productService.listCatalog({
-        cityId: typeof req.query.cityId === 'string' ? req.query.cityId : undefined,
-        pincode: typeof req.query.pincode === 'string' ? req.query.pincode : undefined,
-        category:
-          typeof req.query.category === 'string'
-            ? (req.query.category as ProductCategory)
-            : undefined,
-        subcategory: typeof req.query.subcategory === 'string' ? req.query.subcategory : undefined,
-        search:
-          typeof req.query.search === 'string'
-            ? req.query.search
-            : typeof req.query.q === 'string'
-              ? req.query.q
-              : undefined,
-        inStock,
-        page: Number.isFinite(page) ? page : 1,
-        limit: Number.isFinite(limit) ? limit : 20,
+        cityId: filters.cityId,
+        pincode: filters.pincode,
+        category: filters.category,
+        subcategory: filters.subcategory,
+        search: filters.search,
+        minPricePaise: filters.minPricePaise,
+        maxPricePaise: filters.maxPricePaise,
+        zeroDepositOnly: filters.zeroDepositOnly,
+        availability: filters.availability,
+        sort: filters.sort,
+        inStock: filters.inStock,
+        page: filters.page,
+        limit: filters.limit,
       });
       res.status(200).json({ success: true, data: result });
     } catch (error) {

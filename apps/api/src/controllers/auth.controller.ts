@@ -1,7 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
 import { authService } from '../services/auth.service.js';
+import { cartService } from '../services/cart.service.js';
+import { DEVICE_COOKIE_NAME } from '../middleware/cart-owner.js';
 import { env } from '../config/env.js';
 import { UnauthorizedError } from '../middleware/error-handler.js';
+import { logger } from '../utils/logger.js';
 
 const REFRESH_COOKIE_NAME = 'refreshToken';
 const REFRESH_COOKIE_PATH = '/api/v1/auth';
@@ -26,6 +29,57 @@ function clearRefreshCookie(res: Response): void {
   });
 }
 
+function clearDeviceCookie(res: Response): void {
+  res.clearCookie(DEVICE_COOKIE_NAME, {
+    httpOnly: true,
+    secure: env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+  });
+}
+
+export function validateRefreshOrigin(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): void {
+  if (env.NODE_ENV !== 'production') {
+    next();
+    return;
+  }
+  const origin = req.headers.origin;
+  const referer = req.headers.referer;
+  let refererOrigin: string | undefined;
+  if (typeof referer === 'string') {
+    try {
+      refererOrigin = new URL(referer).origin;
+    } catch {
+      refererOrigin = undefined;
+    }
+  }
+  const source = origin || refererOrigin;
+  if (source !== env.CORS_ORIGIN) {
+    next(new UnauthorizedError('Cross-site authentication request rejected.'));
+    return;
+  }
+  next();
+}
+
+/**
+ * Moves an anonymous device cart into the authenticated user's cart. This never
+ * blocks login: any failure is logged and the device cookie is still cleared.
+ */
+async function mergeGuestCart(req: Request, res: Response, userId: string): Promise<void> {
+  const guestId = req.cookies?.[DEVICE_COOKIE_NAME];
+  if (typeof guestId !== 'string' || guestId.length < 16) return;
+  try {
+    await cartService.mergeGuestCart(guestId, userId);
+  } catch (error) {
+    logger.warn({ err: error }, 'Guest cart merge failed during login');
+  }
+  clearDeviceCookie(res);
+}
+
 export class AuthController {
   public async register(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
@@ -47,6 +101,7 @@ export class AuthController {
   public async login(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const result = await authService.login(req.body);
+      await mergeGuestCart(req, res, result.user.id);
       setRefreshCookie(res, result.refreshToken);
 
       res.status(200).json({
@@ -167,6 +222,7 @@ export class AuthController {
   public async googleAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const result = await authService.googleAuth(req.body.credential);
+      await mergeGuestCart(req, res, result.user.id);
       setRefreshCookie(res, result.refreshToken);
 
       res.status(200).json({

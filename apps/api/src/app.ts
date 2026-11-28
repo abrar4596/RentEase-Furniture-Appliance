@@ -14,6 +14,7 @@ import { productRouter } from './routes/product.routes.js';
 import { uploadRouter } from './routes/upload.routes.js';
 import { catalogRouter } from './routes/catalog.routes.js';
 import { cartRouter } from './routes/cart.routes.js';
+import { addressRouter } from './routes/address.routes.js';
 import { checkoutRouter } from './routes/checkout.routes.js';
 import { orderRouter } from './routes/order.routes.js';
 import { payoutRouter } from './routes/payout.routes.js';
@@ -77,6 +78,7 @@ export function createApp(): Express {
   app.use('/api/v1/products', productRouter);
   app.use('/api/v1/catalog', catalogRouter);
   app.use('/api/v1/cart', cartRouter);
+  app.use('/api/v1/addresses', addressRouter);
   app.use('/api/v1/orders', orderRouter);
   app.use('/api/v1/payments', checkoutRouter);
   app.use('/api/v1/uploads', uploadRouter);
